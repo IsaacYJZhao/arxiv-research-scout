@@ -1,0 +1,34 @@
+topic:
+  name: "3D CT Lung Nodule Detection"
+
+  arxiv_query: >
+    (all:"lung nodule"
+    OR all:"pulmonary nodule"
+    OR all:"LNDb"
+    OR all:"LUNA16")
+    AND
+    (all:"deep learning"
+    OR all:"computed tomography")
+
+  categories:
+    - "cs.CV"
+    - "eess.IV"
+
+
+schedule:
+  run_every_days: 3
+  lookback_days: 5
+
+
+retrieval:
+  max_candidates: 40
+  max_papers: 8
+
+
+output:
+  language: "zh-CN"
+  reports_dir: "reports"
+
+
+state:
+  file: ".state/state.json"
