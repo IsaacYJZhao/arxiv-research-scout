@@ -18,3 +18,17 @@ class ArxivPaper:
     categories: tuple[str, ...]
     abs_url: str
     pdf_url: str
+
+@dataclass(frozen=True, slots=True)
+class RelevanceAssessment:
+    """
+    Deterministic relevance assessment for one paper.
+    """
+
+    score: int
+    level: str
+
+    matched_core_terms: tuple[str, ...]
+    matched_target_terms: tuple[str, ...]
+    matched_supporting_terms: tuple[str, ...]
+    matched_deprioritize_terms: tuple[str, ...]

@@ -24,7 +24,9 @@ from arxiv_research_scout.state_manager import (
     is_run_due,
     load_state,
 )
-
+from arxiv_research_scout.relevance import (
+    rank_relevant_papers,
+)
 
 SearchFunction = Callable[
     [str, int],
@@ -46,7 +48,16 @@ class ScanResult:
     recent_count: int
     unique_count: int
     unprocessed_count: int
-    selected_papers: tuple[ArxivPaper, ...]
+    relevant_count: int
+
+    selected_papers: tuple[
+        tuple[
+            ArxivPaper,
+            int,
+            str,
+        ],
+        ...,
+    ]
 
 
 def run_scan(
@@ -87,6 +98,7 @@ def run_scan(
             recent_count=0,
             unique_count=0,
             unprocessed_count=0,
+            relevant_count=0,
             selected_papers=(),
         )
 
@@ -126,12 +138,23 @@ def run_scan(
         )
     )
 
+    ranked_papers = rank_relevant_papers(
+        unprocessed_papers,
+        config["relevance"],
+    )
+
     max_papers = config["retrieval"][
         "max_papers"
     ]
 
     selected_papers = tuple(
-        unprocessed_papers[:max_papers]
+        (
+            paper,
+            assessment.score,
+            assessment.level,
+        )
+        for paper, assessment
+        in ranked_papers[:max_papers]
     )
 
     return ScanResult(
@@ -147,6 +170,9 @@ def run_scan(
         ),
         unprocessed_count=len(
             unprocessed_papers
+        ),
+        relevant_count=len(
+            ranked_papers
         ),
         selected_papers=selected_papers,
     )
@@ -202,6 +228,11 @@ def print_scan_result(
     )
 
     print(
+        f"Relevant papers      : "
+        f"{result.relevant_count}"
+    )
+
+    print(
         f"Selected for analysis: "
         f"{len(result.selected_papers)}"
     )
@@ -213,10 +244,11 @@ def print_scan_result(
         )
         return
 
-    for index, paper in enumerate(
-        result.selected_papers,
-        start=1,
+    for index, item in enumerate(
+            result.selected_papers,
+            start=1,
     ):
+        paper, score, level = item
         print()
         print("=" * 72)
         print(f"Paper {index}")
@@ -230,6 +262,11 @@ def print_scan_result(
         print(
             f"Published: "
             f"{paper.published}"
+        )
+
+        print(
+            f"Relevance: "
+            f"{score} ({level})"
         )
 
         print(

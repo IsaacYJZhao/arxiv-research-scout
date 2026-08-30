@@ -52,3 +52,19 @@ def test_runtime_paths_in_config_are_relative() -> None:
 
     assert not is_absolute_on_any_platform(reports_dir)
     assert not is_absolute_on_any_platform(state_file)
+
+
+def test_relevance_values_are_valid() -> None:
+    config = load_config()
+
+    relevance = config["relevance"]
+
+    assert relevance["min_score"] >= 0
+
+    assert (
+        relevance["high_score"]
+        >= relevance["min_score"]
+    )
+
+    assert relevance["core_terms"]
+    assert relevance["target_terms"]

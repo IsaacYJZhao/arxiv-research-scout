@@ -23,9 +23,15 @@ def make_paper(
 ) -> ArxivPaper:
     return ArxivPaper(
         arxiv_id=arxiv_id,
-        title=f"Paper {arxiv_id}",
+        title=(
+            f"3D Lung Nodule Detection "
+            f"{arxiv_id}"
+        ),
+        abstract=(
+            "A deep learning method for "
+            "false positive reduction in CT."
+        ),
         authors=("Example Author",),
-        abstract="Example abstract.",
         published=published,
         updated=published,
         categories=("cs.CV",),
@@ -58,6 +64,27 @@ def make_config() -> dict:
         "retrieval": {
             "max_candidates": 40,
             "max_papers": 2,
+        },
+        "relevance": {
+            "min_score": 7,
+            "high_score": 10,
+            "core_terms": [
+                "lung nodule",
+            ],
+            "target_terms": [
+                "detection",
+                "false positive",
+                "candidate classification",
+            ],
+            "supporting_terms": [
+                "CT",
+                "3D",
+                "deep learning",
+            ],
+            "deprioritize_terms": [
+                "segmentation",
+                "malignancy",
+            ],
         },
     }
 
@@ -133,14 +160,15 @@ def test_run_scan_filters_papers() -> None:
     ) == 2
 
     assert (
-        result.selected_papers[0].arxiv_id
+        result.selected_papers[0][0].arxiv_id
         == "2608.10001v2"
     )
 
     assert (
-        result.selected_papers[1].arxiv_id
+        result.selected_papers[1][0].arxiv_id
         == "2608.10002v1"
     )
+    assert result.relevant_count == 2
 
 
 def test_run_scan_skips_when_not_due() -> None:

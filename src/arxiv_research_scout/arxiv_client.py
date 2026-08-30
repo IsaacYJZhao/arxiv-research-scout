@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 
@@ -10,7 +11,20 @@ from arxiv_research_scout.models import ArxivPaper
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 
-DEFAULT_TIMEOUT_SECONDS = 30
+DEFAULT_TIMEOUT_SECONDS = 60
+
+MAX_REQUEST_ATTEMPTS = 4
+
+BASE_RETRY_DELAY_SECONDS = 10.0
+
+RETRYABLE_STATUS_CODES = {
+    429,
+    500,
+    502,
+    503,
+    504,
+}
+
 
 USER_AGENT = (
     "arxiv-research-scout/0.1 "
@@ -223,12 +237,48 @@ def parse_feed(
     ]
 
 
+def get_retry_delay_seconds(
+    response: requests.Response | None,
+    attempt: int,
+) -> float:
+    """
+    Determine how long to wait before retrying.
+
+    Prefer the server-provided Retry-After header
+    when it contains a numeric number of seconds.
+
+    Otherwise use exponential backoff:
+        10s, 20s, 40s, ...
+    """
+
+    if response is not None:
+        retry_after = response.headers.get(
+            "Retry-After"
+        )
+
+        if retry_after:
+            try:
+                return max(
+                    float(retry_after),
+                    0.0,
+                )
+            except ValueError:
+                pass
+
+    return (
+        BASE_RETRY_DELAY_SECONDS
+        * (2 ** (attempt - 1))
+    )
+
 def search_arxiv(
     query: str,
     max_results: int = 20,
 ) -> list[ArxivPaper]:
     """
     Search arXiv and return standardized paper objects.
+
+    Temporary network failures and rate limiting are
+    retried with exponential backoff.
     """
 
     if max_results < 1:
@@ -248,15 +298,77 @@ def search_arxiv(
         "User-Agent": USER_AGENT,
     }
 
-    response = requests.get(
-        ARXIV_API_URL,
-        params=params,
-        headers=headers,
-        timeout=DEFAULT_TIMEOUT_SECONDS,
-    )
+    last_error: Exception | None = None
 
-    response.raise_for_status()
+    for attempt in range(
+        1,
+        MAX_REQUEST_ATTEMPTS + 1,
+    ):
+        try:
+            response = requests.get(
+                ARXIV_API_URL,
+                params=params,
+                headers=headers,
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
 
-    return parse_feed(
-        response.content
+        except (
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ConnectionError,
+        ) as error:
+            last_error = error
+
+            if attempt >= MAX_REQUEST_ATTEMPTS:
+                raise
+
+            delay = get_retry_delay_seconds(
+                response=None,
+                attempt=attempt,
+            )
+
+            print(
+                f"arXiv request failed "
+                f"({type(error).__name__}). "
+                f"Retrying in {delay:.0f}s "
+                f"[{attempt}/{MAX_REQUEST_ATTEMPTS}]..."
+            )
+
+            time.sleep(delay)
+
+            continue
+
+        if (
+            response.status_code
+            in RETRYABLE_STATUS_CODES
+        ):
+            if attempt >= MAX_REQUEST_ATTEMPTS:
+                response.raise_for_status()
+
+            delay = get_retry_delay_seconds(
+                response=response,
+                attempt=attempt,
+            )
+
+            print(
+                f"arXiv returned HTTP "
+                f"{response.status_code}. "
+                f"Retrying in {delay:.0f}s "
+                f"[{attempt}/{MAX_REQUEST_ATTEMPTS}]..."
+            )
+
+            time.sleep(delay)
+
+            continue
+
+        response.raise_for_status()
+
+        return parse_feed(
+            response.content
+        )
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError(
+        "arXiv request failed unexpectedly."
     )

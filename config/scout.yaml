@@ -24,7 +24,43 @@ retrieval:
   max_candidates: 40
   max_papers: 8
 
+relevance:
+  min_score: 7
+  high_score: 10
 
+  core_terms:
+    - "lung nodule"
+    - "pulmonary nodule"
+    - "LUNA16"
+    - "LNDb"
+
+  target_terms:
+    - "detection"
+    - "detector"
+    - "false positive"
+    - "false-positive"
+    - "false positive reduction"
+    - "false-positive reduction"
+    - "candidate generation"
+    - "candidate detection"
+    - "candidate classification"
+    - "computer-aided detection"
+    - "computer aided detection"
+
+  supporting_terms:
+    - "computed tomography"
+    - "CT"
+    - "3D"
+    - "deep learning"
+
+  deprioritize_terms:
+    - "segmentation"
+    - "malignancy"
+    - "characterization"
+    - "triage"
+    - "vision-language model"
+    - "vision language model"
+    - "clinical decision making"
 output:
   language: "zh-CN"
   reports_dir: "reports"

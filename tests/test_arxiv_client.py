@@ -1,8 +1,11 @@
+import requests
+
 from arxiv_research_scout.arxiv_client import (
     build_search_query,
     clean_text,
     parse_arxiv_id,
     parse_feed,
+    search_arxiv,
 )
 
 
@@ -132,3 +135,61 @@ def test_parse_feed() -> None:
     assert paper.pdf_url == (
         "https://arxiv.org/pdf/2608.12345v1"
     )
+
+def test_search_arxiv_retries_after_429(
+    monkeypatch,
+) -> None:
+    rate_limited = requests.Response()
+    rate_limited.status_code = 429
+    rate_limited._content = b"rate limited"
+
+    success = requests.Response()
+    success.status_code = 200
+    success._content = (
+        b'<?xml version="1.0" '
+        b'encoding="UTF-8"?>'
+        b'<feed '
+        b'xmlns="http://www.w3.org/2005/Atom">'
+        b'</feed>'
+    )
+
+    responses = [
+        rate_limited,
+        success,
+    ]
+
+    sleep_calls: list[float] = []
+
+    def fake_get(
+        *args,
+        **kwargs,
+    ):
+        return responses.pop(0)
+
+    def fake_sleep(
+        seconds: float,
+    ) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(
+        "arxiv_research_scout."
+        "arxiv_client.requests.get",
+        fake_get,
+    )
+
+    monkeypatch.setattr(
+        "arxiv_research_scout."
+        "arxiv_client.time.sleep",
+        fake_sleep,
+    )
+
+    papers = search_arxiv(
+        'all:"lung nodule"',
+        max_results=1,
+    )
+
+    assert papers == []
+
+    assert len(sleep_calls) == 1
+
+    assert sleep_calls[0] >= 0
