@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import (
+    Callable,
+    Sequence,
+)
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from arxiv_research_scout.arxiv_client import (
     build_search_query,
     search_arxiv,
 )
-from arxiv_research_scout.config import load_config
-from arxiv_research_scout.models import ArxivPaper
+from arxiv_research_scout.config import (
+    load_config,
+)
+from arxiv_research_scout.models import (
+    ArxivPaper,
+)
 from arxiv_research_scout.paper_filters import (
     deduplicate_papers,
     filter_recent_papers,
@@ -19,14 +25,15 @@ from arxiv_research_scout.paper_filters import (
 from arxiv_research_scout.paths import (
     resolve_project_path,
 )
+from arxiv_research_scout.relevance import (
+    rank_relevant_papers,
+)
 from arxiv_research_scout.state_manager import (
     filter_unprocessed_papers,
     is_run_due,
     load_state,
 )
-from arxiv_research_scout.relevance import (
-    rank_relevant_papers,
-)
+
 
 SearchFunction = Callable[
     [str, int],
@@ -34,16 +41,27 @@ SearchFunction = Callable[
 ]
 
 
-@dataclass(frozen=True, slots=True)
+SelectedPaper = tuple[
+    ArxivPaper,
+    int,
+    str,
+]
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class ScanResult:
     """
-    Result of one arXiv scan.
+    Result of one arXiv retrieval and relevance scan.
 
-    This object contains only retrieval/filtering
-    information. It does not modify persistent state.
+    This object contains no LLM analysis and does
+    not modify persistent state.
     """
 
     due: bool
+
     candidate_count: int
     recent_count: int
     unique_count: int
@@ -51,84 +69,147 @@ class ScanResult:
     relevant_count: int
 
     selected_papers: tuple[
-        tuple[
-            ArxivPaper,
-            int,
-            str,
-        ],
+        SelectedPaper,
         ...,
     ]
 
 
+def empty_scan_result(
+    *,
+    due: bool,
+) -> ScanResult:
+    """
+    Construct an empty ScanResult.
+
+    This is primarily used when the configured
+    scheduling interval has not elapsed.
+    """
+
+    return ScanResult(
+        due=due,
+        candidate_count=0,
+        recent_count=0,
+        unique_count=0,
+        unprocessed_count=0,
+        relevant_count=0,
+        selected_papers=(),
+    )
+
+
 def run_scan(
-    config: dict[str, Any],
-    state: dict[str, Any],
+    config: dict,
+    state: dict,
     *,
     force: bool = False,
     now: datetime | None = None,
-    search_function: SearchFunction = search_arxiv,
+    search_function: SearchFunction = (
+        search_arxiv
+    ),
 ) -> ScanResult:
     """
-    Run one retrieval/filtering cycle.
+    Run the retrieval and relevance-selection stage.
 
-    This function intentionally does NOT mark papers
-    as processed and does NOT update last successful run.
+    Pipeline:
 
-    Persistent state will only be updated later after
-    analysis and report generation succeed.
+        schedule check
+            ->
+        arXiv retrieval
+            ->
+        lookback filtering
+            ->
+        arXiv-ID deduplication
+            ->
+        processed-ID filtering
+            ->
+        relevance ranking
+            ->
+        select top papers
+
+    Important:
+    This function never modifies state.
     """
 
-    run_every_days = config["schedule"][
-        "run_every_days"
+    schedule_config = config[
+        "schedule"
     ]
 
-    due = (
-        force
-        or is_run_due(
+    run_every_days = int(
+        schedule_config[
+            "run_every_days"
+        ]
+    )
+
+    if (
+        not force
+        and not is_run_due(
             state,
-            run_every_days=run_every_days,
+            run_every_days,
+            now=now,
+        )
+    ):
+        return empty_scan_result(
+            due=False
+        )
+
+    topic_config = config[
+        "topic"
+    ]
+
+    retrieval_config = config[
+        "retrieval"
+    ]
+
+    relevance_config = config[
+        "relevance"
+    ]
+
+    base_query = str(
+        topic_config[
+            "arxiv_query"
+        ]
+    ).strip()
+
+    categories = tuple(
+        topic_config.get(
+            "categories",
+            (),
+        )
+    )
+
+    query = build_search_query(
+        base_query,
+        categories,
+    )
+
+    max_candidates = int(
+        retrieval_config[
+            "max_candidates"
+        ]
+    )
+
+    candidates = search_function(
+        query,
+        max_candidates,
+    )
+
+    lookback_days = int(
+        schedule_config[
+            "lookback_days"
+        ]
+    )
+
+    recent_papers = (
+        filter_recent_papers(
+            candidates,
+            lookback_days,
             now=now,
         )
     )
 
-    if not due:
-        return ScanResult(
-            due=False,
-            candidate_count=0,
-            recent_count=0,
-            unique_count=0,
-            unprocessed_count=0,
-            relevant_count=0,
-            selected_papers=(),
+    unique_papers = (
+        deduplicate_papers(
+            recent_papers
         )
-
-    topic_config = config["topic"]
-
-    query = build_search_query(
-        topic_config["arxiv_query"],
-        topic_config.get(
-            "categories",
-            [],
-        ),
-    )
-
-    candidate_papers = search_function(
-        query,
-        config["retrieval"][
-            "max_candidates"
-        ],
-    )
-
-    recent_papers = filter_recent_papers(
-        papers=candidate_papers,
-        lookback_days=config["schedule"][
-            "lookback_days"
-        ],
-        now=now,
-    )
-
-    unique_papers = deduplicate_papers(
-        recent_papers
     )
 
     unprocessed_papers = (
@@ -138,29 +219,45 @@ def run_scan(
         )
     )
 
-    ranked_papers = rank_relevant_papers(
-        unprocessed_papers,
-        config["relevance"],
-    )
-
-    max_papers = config["retrieval"][
-        "max_papers"
-    ]
-
-    selected_papers = tuple(
-        (
-            paper,
-            assessment.score,
-            assessment.level,
+    ranked_papers = (
+        rank_relevant_papers(
+            unprocessed_papers,
+            relevance_config,
         )
-        for paper, assessment
-        in ranked_papers[:max_papers]
     )
+
+    max_papers = int(
+        retrieval_config[
+            "max_papers"
+        ]
+    )
+
+    selected_ranked = (
+        ranked_papers[
+            :max_papers
+        ]
+    )
+
+    selected_papers: list[
+        SelectedPaper
+    ] = []
+
+    for (
+        paper,
+        assessment,
+    ) in selected_ranked:
+        selected_papers.append(
+            (
+                paper,
+                assessment.score,
+                assessment.level,
+            )
+        )
 
     return ScanResult(
         due=True,
         candidate_count=len(
-            candidate_papers
+            candidates
         ),
         recent_count=len(
             recent_papers
@@ -174,17 +271,27 @@ def run_scan(
         relevant_count=len(
             ranked_papers
         ),
-        selected_papers=selected_papers,
+        selected_papers=tuple(
+            selected_papers
+        ),
     )
 
 
 def print_scan_result(
-    config: dict[str, Any],
+    config: dict,
     result: ScanResult,
 ) -> None:
     """
     Print a human-readable scan summary.
     """
+
+    topic_name = str(
+        config[
+            "topic"
+        ][
+            "name"
+        ]
+    )
 
     print()
     print(
@@ -193,20 +300,16 @@ def print_scan_result(
     print()
 
     print(
-        f"Topic: "
-        f"{config['topic']['name']}"
+        f"Topic: {topic_name}"
     )
+    print()
 
     if not result.due:
-        print()
         print(
-            "Scan skipped: "
-            "the configured interval "
-            "has not elapsed yet."
+            "Run is not due yet."
         )
         return
 
-    print()
     print(
         f"Candidates retrieved : "
         f"{result.candidate_count}"
@@ -244,51 +347,63 @@ def print_scan_result(
         )
         return
 
-    for index, item in enumerate(
-            result.selected_papers,
-            start=1,
+    print()
+    print(
+        "Selected papers:"
+    )
+
+    for (
+        index,
+        selected,
+    ) in enumerate(
+        result.selected_papers,
+        start=1,
     ):
-        paper, score, level = item
+        paper, score, level = (
+            selected
+        )
+
         print()
-        print("=" * 72)
-        print(f"Paper {index}")
-        print("=" * 72)
 
         print(
-            f"arXiv ID : "
-            f"{paper.arxiv_id}"
-        )
-
-        print(
-            f"Published: "
-            f"{paper.published}"
-        )
-
-        print(
-            f"Relevance: "
-            f"{score} ({level})"
-        )
-
-        print(
-            f"Title    : "
+            f"{index}. "
             f"{paper.title}"
         )
 
         print(
-            f"PDF      : "
-            f"{paper.pdf_url}"
+            f"   arXiv ID  : "
+            f"{paper.arxiv_id}"
+        )
+
+        print(
+            f"   Relevance : "
+            f"{score} ({level})"
+        )
+
+        print(
+            f"   Published : "
+            f"{paper.published}"
+        )
+
+        print(
+            f"   URL       : "
+            f"{paper.abs_url}"
         )
 
 
-def parse_arguments() -> argparse.Namespace:
+def build_parser(
+) -> argparse.ArgumentParser:
     """
-    Parse command-line arguments.
+    Build the legacy runner-only CLI.
+
+    The project's primary CLI is now cli.py, but this
+    entry point is retained for backward compatibility.
     """
 
     parser = argparse.ArgumentParser(
         description=(
-            "Search arXiv for new papers "
-            "matching the configured topic."
+            "Run the arXiv retrieval "
+            "and relevance scan."
         )
     )
 
@@ -296,21 +411,39 @@ def parse_arguments() -> argparse.Namespace:
         "--force",
         action="store_true",
         help=(
-            "Run even if the configured "
-            "schedule interval has not elapsed."
+            "Ignore the configured "
+            "scheduling interval."
         ),
     )
 
-    return parser.parse_args()
+    return parser
 
 
-def main() -> None:
-    args = parse_arguments()
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    """
+    Standalone scan-only entry point.
+
+    For the complete workflow, use:
+
+        arxiv-scout run
+    """
+
+    parser = build_parser()
+
+    args = parser.parse_args(
+        argv
+    )
 
     config = load_config()
 
     state_file = resolve_project_path(
-        config["state"]["file"]
+        config[
+            "state"
+        ][
+            "file"
+        ]
     )
 
     state = load_state(
@@ -318,8 +451,8 @@ def main() -> None:
     )
 
     result = run_scan(
-        config=config,
-        state=state,
+        config,
+        state,
         force=args.force,
     )
 
@@ -328,6 +461,10 @@ def main() -> None:
         result,
     )
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        main()
+    )

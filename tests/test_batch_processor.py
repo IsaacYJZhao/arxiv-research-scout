@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from arxiv_research_scout.batch_processor import (
     process_paper_batch,
 )
@@ -39,10 +37,12 @@ def make_paper(
 
 def make_settings() -> LLMProviderSettings:
     return LLMProviderSettings(
-        provider="openai",
-        model="test-model",
-        api_key_env="OPENAI_API_KEY",
-        base_url=None,
+        provider="deepseek",
+        model="deepseek-v4-pro",
+        api_key_env="DEEPSEEK_API_KEY",
+        base_url=(
+            "https://api.deepseek.com"
+        ),
         max_output_tokens=2500,
     )
 
@@ -101,18 +101,13 @@ def make_state() -> dict:
     }
 
 
-def test_all_success_marks_run_successful(
+def test_all_success_returns_committed_papers(
     tmp_path: Path,
 ) -> None:
     papers = [
         make_paper("2608.10001v1"),
         make_paper("2608.10002v1"),
     ]
-
-    state = make_state()
-
-    marker_called = False
-    saver_called = False
 
     def fake_transaction(
         paper,
@@ -123,29 +118,10 @@ def test_all_success_marks_run_successful(
             tmp_path,
         )
 
-    def fake_run_marker(
-        staged_state,
-        now=None,
-    ):
-        nonlocal marker_called
-
-        marker_called = True
-
-        staged_state[
-            "last_successful_run_utc"
-        ] = "success"
-
-    def fake_state_saver(
-        state_file,
-        staged_state,
-    ):
-        nonlocal saver_called
-        saver_called = True
-
     result = process_paper_batch(
         papers,
         config={},
-        state=state,
+        state=make_state(),
         state_file=(
             tmp_path / "state.json"
         ),
@@ -153,8 +129,6 @@ def test_all_success_marks_run_successful(
         client=object(),
         settings=make_settings(),
         transaction=fake_transaction,
-        run_marker=fake_run_marker,
-        state_saver=fake_state_saver,
     )
 
     assert len(
@@ -163,18 +137,8 @@ def test_all_success_marks_run_successful(
 
     assert not result.failures
 
-    assert (
+    assert not (
         result.run_marked_successful
-    )
-
-    assert marker_called
-    assert saver_called
-
-    assert (
-        state[
-            "last_successful_run_utc"
-        ]
-        == "success"
     )
 
 
@@ -187,13 +151,13 @@ def test_failure_does_not_stop_later_papers(
         make_paper("2608.10003v1"),
     ]
 
-    processed = []
+    attempted = []
 
     def fake_transaction(
         paper,
         **kwargs,
     ):
-        processed.append(
+        attempted.append(
             paper.arxiv_id
         )
 
@@ -223,7 +187,7 @@ def test_failure_does_not_stop_later_papers(
         transaction=fake_transaction,
     )
 
-    assert processed == [
+    assert attempted == [
         "2608.10001v1",
         "2608.10002v1",
         "2608.10003v1",
@@ -236,53 +200,6 @@ def test_failure_does_not_stop_later_papers(
     assert len(
         result.failures
     ) == 1
-
-
-def test_partial_failure_does_not_mark_run_successful(
-    tmp_path: Path,
-) -> None:
-    paper = make_paper(
-        "2608.10001v1"
-    )
-
-    marker_called = False
-
-    def failing_transaction(
-        paper,
-        **kwargs,
-    ):
-        raise RuntimeError(
-            "analysis failed"
-        )
-
-    def fake_run_marker(
-        staged_state,
-        now=None,
-    ):
-        nonlocal marker_called
-        marker_called = True
-
-    result = process_paper_batch(
-        [paper],
-        config={},
-        state=make_state(),
-        state_file=(
-            tmp_path / "state.json"
-        ),
-        reports_dir=tmp_path,
-        client=object(),
-        settings=make_settings(),
-        transaction=(
-            failing_transaction
-        ),
-        run_marker=fake_run_marker,
-    )
-
-    assert not marker_called
-
-    assert not (
-        result.run_marked_successful
-    )
 
 
 def test_failure_information_is_recorded(
@@ -315,6 +232,10 @@ def test_failure_information_is_recorded(
         ),
     )
 
+    assert len(
+        result.failures
+    ) == 1
+
     failure = result.failures[0]
 
     assert failure.arxiv_id == (
@@ -329,25 +250,15 @@ def test_failure_information_is_recorded(
         "ValueError: bad paper"
     )
 
+    assert not (
+        result.run_marked_successful
+    )
 
-def test_empty_batch_is_successful(
+
+def test_empty_batch_does_not_mark_run_successful(
     tmp_path: Path,
 ) -> None:
     state = make_state()
-
-    def fake_run_marker(
-        staged_state,
-        now=None,
-    ):
-        staged_state[
-            "last_successful_run_utc"
-        ] = "empty-success"
-
-    def fake_state_saver(
-        state_file,
-        staged_state,
-    ):
-        return None
 
     result = process_paper_batch(
         [],
@@ -357,16 +268,14 @@ def test_empty_batch_is_successful(
             tmp_path / "state.json"
         ),
         reports_dir=tmp_path,
-        client=object(),
+        client=None,
         settings=make_settings(),
-        run_marker=fake_run_marker,
-        state_saver=fake_state_saver,
     )
 
     assert not result.committed
     assert not result.failures
 
-    assert (
+    assert not (
         result.run_marked_successful
     )
 
@@ -374,56 +283,140 @@ def test_empty_batch_is_successful(
         state[
             "last_successful_run_utc"
         ]
-        == "empty-success"
+        is None
     )
 
 
-def test_final_state_save_failure_keeps_old_run_timestamp(
+def test_batch_does_not_modify_run_timestamp(
     tmp_path: Path,
 ) -> None:
+    paper = make_paper(
+        "2608.10001v1"
+    )
+
     state = make_state()
 
-    def fake_run_marker(
-        staged_state,
-        now=None,
+    def fake_transaction(
+        paper,
+        **kwargs,
     ):
-        staged_state[
-            "last_successful_run_utc"
-        ] = "new-value"
-
-    def failing_state_saver(
-        state_file,
-        staged_state,
-    ):
-        raise OSError(
-            "final state save failed"
+        return make_commit(
+            paper,
+            tmp_path,
         )
 
-    with pytest.raises(
-        OSError,
-        match=(
-            "final state save failed"
+    process_paper_batch(
+        [paper],
+        config={},
+        state=state,
+        state_file=(
+            tmp_path / "state.json"
         ),
-    ):
-        process_paper_batch(
-            [],
-            config={},
-            state=state,
-            state_file=(
-                tmp_path / "state.json"
-            ),
-            reports_dir=tmp_path,
-            client=object(),
-            settings=make_settings(),
-            run_marker=fake_run_marker,
-            state_saver=(
-                failing_state_saver
-            ),
-        )
+        reports_dir=tmp_path,
+        client=object(),
+        settings=make_settings(),
+        transaction=fake_transaction,
+    )
 
     assert (
         state[
             "last_successful_run_utc"
         ]
         is None
+    )
+
+
+def test_transaction_receives_shared_runtime_objects(
+    tmp_path: Path,
+) -> None:
+    paper = make_paper(
+        "2608.10001v1"
+    )
+
+    state = make_state()
+    client = object()
+    settings = make_settings()
+
+    captured = {}
+
+    def fake_transaction(
+        received_paper,
+        **kwargs,
+    ):
+        captured["paper"] = (
+            received_paper
+        )
+
+        captured["state"] = (
+            kwargs["state"]
+        )
+
+        captured["state_file"] = (
+            kwargs["state_file"]
+        )
+
+        captured["reports_dir"] = (
+            kwargs["reports_dir"]
+        )
+
+        captured["client"] = (
+            kwargs["client"]
+        )
+
+        captured["settings"] = (
+            kwargs["settings"]
+        )
+
+        return make_commit(
+            received_paper,
+            tmp_path,
+        )
+
+    state_file = (
+        tmp_path / "state.json"
+    )
+
+    reports_dir = (
+        tmp_path / "reports"
+    )
+
+    process_paper_batch(
+        [paper],
+        config={},
+        state=state,
+        state_file=state_file,
+        reports_dir=reports_dir,
+        client=client,
+        settings=settings,
+        transaction=fake_transaction,
+    )
+
+    assert (
+        captured["paper"]
+        is paper
+    )
+
+    assert (
+        captured["state"]
+        is state
+    )
+
+    assert (
+        captured["state_file"]
+        == state_file
+    )
+
+    assert (
+        captured["reports_dir"]
+        == reports_dir
+    )
+
+    assert (
+        captured["client"]
+        is client
+    )
+
+    assert (
+        captured["settings"]
+        is settings
     )

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from arxiv_research_scout.models import (
     ArxivPaper,
     BatchProcessingResult,
@@ -9,6 +11,7 @@ from arxiv_research_scout.runner import (
     ScanResult,
 )
 from arxiv_research_scout.workflow import (
+    get_digests_dir,
     run_research_workflow,
     workflow_exit_code,
 )
@@ -17,7 +20,7 @@ from arxiv_research_scout.workflow import (
 def make_config() -> dict:
     return {
         "llm": {
-            "default_provider": "openai",
+            "default_provider": "deepseek",
             "max_context_chars": 45000,
             "max_output_tokens": 2500,
             "openai": {
@@ -30,6 +33,14 @@ def make_config() -> dict:
                 ),
             },
         }
+    }
+
+
+def make_state() -> dict:
+    return {
+        "schema_version": 1,
+        "last_successful_run_utc": None,
+        "processed_ids": [],
     }
 
 
@@ -80,11 +91,29 @@ def make_scan(
     )
 
 
+def empty_success_batch() -> BatchProcessingResult:
+    return BatchProcessingResult(
+        committed=(),
+        failures=(),
+        run_marked_successful=False,
+    )
+
+
+def test_get_digests_dir() -> None:
+    assert get_digests_dir(
+        Path("reports")
+    ) == (
+        Path("reports")
+        / "digests"
+    )
+
+
 def test_not_due_skips_batch_and_api_key(
     tmp_path: Path,
 ) -> None:
     batch_called = False
     key_called = False
+    digest_called = False
 
     def fake_scan(**kwargs):
         return make_scan(
@@ -96,19 +125,39 @@ def test_not_due_skips_batch_and_api_key(
         **kwargs,
     ):
         nonlocal batch_called
+
         batch_called = True
-        raise AssertionError
+
+        raise AssertionError(
+            "Batch must not run."
+        )
 
     def fake_key_loader(
         settings,
     ):
         nonlocal key_called
+
         key_called = True
-        raise AssertionError
+
+        raise AssertionError(
+            "API key must not be loaded."
+        )
+
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        nonlocal digest_called
+
+        digest_called = True
+
+        raise AssertionError(
+            "Digest must not be written."
+        )
 
     result = run_research_workflow(
         config=make_config(),
-        state={},
+        state=make_state(),
         state_file=(
             tmp_path / "state.json"
         ),
@@ -116,17 +165,35 @@ def test_not_due_skips_batch_and_api_key(
         scan_function=fake_scan,
         batch_function=fake_batch,
         api_key_loader=fake_key_loader,
+        digest_writer=(
+            fake_digest_writer
+        ),
     )
 
     assert result.batch is None
     assert result.settings is None
+    assert result.digest_path is None
+
+    assert not (
+        result.run_marked_successful
+    )
+
     assert not batch_called
     assert not key_called
+    assert not digest_called
 
 
 def test_empty_batch_does_not_need_api_key(
     tmp_path: Path,
 ) -> None:
+    state = make_state()
+
+    digest_path = (
+        tmp_path
+        / "digests"
+        / "digest.md"
+    )
+
     captured = {}
 
     def fake_scan(**kwargs):
@@ -138,7 +205,7 @@ def test_empty_batch_does_not_need_api_key(
         settings,
     ):
         raise AssertionError(
-            "API key should not be loaded"
+            "API key should not be loaded."
         )
 
     def fake_batch(
@@ -150,15 +217,36 @@ def test_empty_batch_does_not_need_api_key(
             kwargs["client"]
         )
 
-        return BatchProcessingResult(
-            committed=(),
-            failures=(),
-            run_marked_successful=True,
+        return empty_success_batch()
+
+    def fake_digest_writer(
+        scan,
+        batch,
+        **kwargs,
+    ):
+        captured["digests_dir"] = (
+            kwargs["digests_dir"]
         )
+
+        return digest_path
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        staged_state[
+            "last_successful_run_utc"
+        ] = "empty-success"
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        return None
 
     result = run_research_workflow(
         config=make_config(),
-        state={},
+        state=state,
         state_file=(
             tmp_path / "state.json"
         ),
@@ -166,14 +254,40 @@ def test_empty_batch_does_not_need_api_key(
         scan_function=fake_scan,
         batch_function=fake_batch,
         api_key_loader=fake_key_loader,
+        digest_writer=(
+            fake_digest_writer
+        ),
+        run_marker=fake_run_marker,
+        state_saver=fake_state_saver,
     )
 
     assert captured["papers"] == []
-    assert captured["client"] is None
 
     assert (
-        result.batch
-        is not None
+        captured["client"]
+        is None
+    )
+
+    assert captured[
+        "digests_dir"
+    ] == (
+        tmp_path / "digests"
+    )
+
+    assert (
+        result.digest_path
+        == digest_path
+    )
+
+    assert (
+        result.run_marked_successful
+    )
+
+    assert (
+        state[
+            "last_successful_run_utc"
+        ]
+        == "empty-success"
     )
 
 
@@ -206,7 +320,10 @@ def test_selected_papers_create_client(
         *,
         api_key,
     ):
-        captured["api_key"] = api_key
+        captured["api_key"] = (
+            api_key
+        )
+
         return fake_client
 
     def fake_batch(
@@ -218,15 +335,34 @@ def test_selected_papers_create_client(
             kwargs["client"]
         )
 
-        return BatchProcessingResult(
-            committed=(),
-            failures=(),
-            run_marked_successful=True,
+        return empty_success_batch()
+
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        return (
+            tmp_path
+            / "digest.md"
         )
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        staged_state[
+            "last_successful_run_utc"
+        ] = "success"
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        return None
 
     run_research_workflow(
         config=make_config(),
-        state={},
+        state=make_state(),
         state_file=(
             tmp_path / "state.json"
         ),
@@ -237,6 +373,11 @@ def test_selected_papers_create_client(
         client_factory=(
             fake_client_factory
         ),
+        digest_writer=(
+            fake_digest_writer
+        ),
+        run_marker=fake_run_marker,
+        state_saver=fake_state_saver,
     )
 
     assert captured["papers"] == [
@@ -251,6 +392,11 @@ def test_selected_papers_create_client(
     assert (
         captured["api_key"]
         == "secret-key"
+    )
+
+    assert (
+        captured["key_provider"]
+        == "deepseek"
     )
 
 
@@ -287,22 +433,39 @@ def test_provider_and_model_override(
         papers,
         **kwargs,
     ):
-        return BatchProcessingResult(
-            committed=(),
-            failures=(),
-            run_marked_successful=True,
+        return empty_success_batch()
+
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        return (
+            tmp_path
+            / "digest.md"
         )
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        staged_state[
+            "last_successful_run_utc"
+        ] = "success"
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        return None
 
     run_research_workflow(
         config=make_config(),
-        state={},
+        state=make_state(),
         state_file=(
             tmp_path / "state.json"
         ),
         reports_dir=tmp_path,
-        provider_override=(
-            "deepseek"
-        ),
+        provider_override="openai",
         model_override=(
             "temporary-model"
         ),
@@ -312,6 +475,11 @@ def test_provider_and_model_override(
         client_factory=(
             fake_client_factory
         ),
+        digest_writer=(
+            fake_digest_writer
+        ),
+        run_marker=fake_run_marker,
+        state_saver=fake_state_saver,
     )
 
     settings = captured[
@@ -320,7 +488,7 @@ def test_provider_and_model_override(
 
     assert (
         settings.provider
-        == "deepseek"
+        == "openai"
     )
 
     assert (
@@ -329,13 +497,31 @@ def test_provider_and_model_override(
     )
 
 
-def test_failure_batch_returns_exit_code_one(
+def test_partial_failure_writes_digest_but_does_not_mark_run(
     tmp_path: Path,
 ) -> None:
-    failure = PaperProcessingFailure(
-        arxiv_id="2608.10000v1",
-        title="Example Paper",
-        error="RuntimeError: failed",
+    paper = make_paper()
+
+    state = make_state()
+
+    failure = (
+        PaperProcessingFailure(
+            arxiv_id=(
+                paper.arxiv_id
+            ),
+            title=paper.title,
+            error=(
+                "RuntimeError: failed"
+            ),
+        )
+    )
+
+    digest_called = False
+    marker_called = False
+    saver_called = False
+
+    digest_path = (
+        tmp_path / "partial.md"
     )
 
     def fake_scan(**kwargs):
@@ -353,15 +539,67 @@ def test_failure_batch_returns_exit_code_one(
             run_marked_successful=False,
         )
 
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        nonlocal digest_called
+
+        digest_called = True
+
+        return digest_path
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        nonlocal marker_called
+
+        marker_called = True
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        nonlocal saver_called
+
+        saver_called = True
+
     result = run_research_workflow(
         config=make_config(),
-        state={},
+        state=state,
         state_file=(
             tmp_path / "state.json"
         ),
         reports_dir=tmp_path,
         scan_function=fake_scan,
         batch_function=fake_batch,
+        digest_writer=(
+            fake_digest_writer
+        ),
+        run_marker=fake_run_marker,
+        state_saver=fake_state_saver,
+    )
+
+    assert digest_called
+
+    assert (
+        result.digest_path
+        == digest_path
+    )
+
+    assert not (
+        result.run_marked_successful
+    )
+
+    assert not marker_called
+    assert not saver_called
+
+    assert (
+        state[
+            "last_successful_run_utc"
+        ]
+        is None
     )
 
     assert (
@@ -369,6 +607,257 @@ def test_failure_batch_returns_exit_code_one(
             result
         )
         == 1
+    )
+
+
+def test_digest_failure_does_not_mark_run_successful(
+    tmp_path: Path,
+) -> None:
+    state = make_state()
+
+    marker_called = False
+    saver_called = False
+
+    def fake_scan(**kwargs):
+        return make_scan(
+            due=True
+        )
+
+    def fake_batch(
+        papers,
+        **kwargs,
+    ):
+        return empty_success_batch()
+
+    def failing_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        raise RuntimeError(
+            "digest failed"
+        )
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        nonlocal marker_called
+
+        marker_called = True
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        nonlocal saver_called
+
+        saver_called = True
+
+    with pytest.raises(
+        RuntimeError,
+        match="digest failed",
+    ):
+        run_research_workflow(
+            config=make_config(),
+            state=state,
+            state_file=(
+                tmp_path / "state.json"
+            ),
+            reports_dir=tmp_path,
+            scan_function=fake_scan,
+            batch_function=fake_batch,
+            digest_writer=(
+                failing_digest_writer
+            ),
+            run_marker=fake_run_marker,
+            state_saver=(
+                fake_state_saver
+            ),
+        )
+
+    assert not marker_called
+    assert not saver_called
+
+    assert (
+        state[
+            "last_successful_run_utc"
+        ]
+        is None
+    )
+
+
+def test_successful_run_order_is_batch_digest_marker_save(
+    tmp_path: Path,
+) -> None:
+    paper = make_paper()
+
+    state = make_state()
+
+    call_order = []
+
+    def fake_scan(**kwargs):
+        return make_scan(
+            due=True,
+            papers=(paper,),
+        )
+
+    def fake_key_loader(
+        settings,
+    ):
+        return "secret-key"
+
+    def fake_client_factory(
+        settings,
+        *,
+        api_key,
+    ):
+        return object()
+
+    def fake_batch(
+        papers,
+        **kwargs,
+    ):
+        call_order.append(
+            "batch"
+        )
+
+        return empty_success_batch()
+
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        call_order.append(
+            "digest"
+        )
+
+        return (
+            tmp_path
+            / "digest.md"
+        )
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        call_order.append(
+            "run_marker"
+        )
+
+        staged_state[
+            "last_successful_run_utc"
+        ] = "success"
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        call_order.append(
+            "state_saver"
+        )
+
+    result = run_research_workflow(
+        config=make_config(),
+        state=state,
+        state_file=(
+            tmp_path / "state.json"
+        ),
+        reports_dir=tmp_path,
+        scan_function=fake_scan,
+        batch_function=fake_batch,
+        api_key_loader=fake_key_loader,
+        client_factory=(
+            fake_client_factory
+        ),
+        digest_writer=(
+            fake_digest_writer
+        ),
+        run_marker=fake_run_marker,
+        state_saver=fake_state_saver,
+    )
+
+    assert call_order == [
+        "batch",
+        "digest",
+        "run_marker",
+        "state_saver",
+    ]
+
+    assert (
+        result.run_marked_successful
+    )
+
+
+def test_final_state_save_failure_keeps_old_run_timestamp(
+    tmp_path: Path,
+) -> None:
+    state = make_state()
+
+    def fake_scan(**kwargs):
+        return make_scan(
+            due=True
+        )
+
+    def fake_batch(
+        papers,
+        **kwargs,
+    ):
+        return empty_success_batch()
+
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        return (
+            tmp_path
+            / "digest.md"
+        )
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        staged_state[
+            "last_successful_run_utc"
+        ] = "new-value"
+
+    def failing_state_saver(
+        state_file,
+        staged_state,
+    ):
+        raise OSError(
+            "final state save failed"
+        )
+
+    with pytest.raises(
+        OSError,
+        match=(
+            "final state save failed"
+        ),
+    ):
+        run_research_workflow(
+            config=make_config(),
+            state=state,
+            state_file=(
+                tmp_path / "state.json"
+            ),
+            reports_dir=tmp_path,
+            scan_function=fake_scan,
+            batch_function=fake_batch,
+            digest_writer=(
+                fake_digest_writer
+            ),
+            run_marker=fake_run_marker,
+            state_saver=(
+                failing_state_saver
+            ),
+        )
+
+    assert (
+        state[
+            "last_successful_run_utc"
+        ]
+        is None
     )
 
 
@@ -384,21 +873,45 @@ def test_success_returns_exit_code_zero(
         papers,
         **kwargs,
     ):
-        return BatchProcessingResult(
-            committed=(),
-            failures=(),
-            run_marked_successful=True,
+        return empty_success_batch()
+
+    def fake_digest_writer(
+        *args,
+        **kwargs,
+    ):
+        return (
+            tmp_path
+            / "digest.md"
         )
+
+    def fake_run_marker(
+        staged_state,
+        now=None,
+    ):
+        staged_state[
+            "last_successful_run_utc"
+        ] = "success"
+
+    def fake_state_saver(
+        state_file,
+        staged_state,
+    ):
+        return None
 
     result = run_research_workflow(
         config=make_config(),
-        state={},
+        state=make_state(),
         state_file=(
             tmp_path / "state.json"
         ),
         reports_dir=tmp_path,
         scan_function=fake_scan,
         batch_function=fake_batch,
+        digest_writer=(
+            fake_digest_writer
+        ),
+        run_marker=fake_run_marker,
+        state_saver=fake_state_saver,
     )
 
     assert (

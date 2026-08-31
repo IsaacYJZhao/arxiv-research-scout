@@ -15,11 +15,17 @@ from arxiv_research_scout.llm_provider import (
     VALID_PROVIDERS,
     resolve_provider_settings,
 )
+from arxiv_research_scout.manual_analysis import (
+    analyze_single_paper,
+)
 from arxiv_research_scout.models import (
     LLMProviderSettings,
 )
 from arxiv_research_scout.paths import (
     resolve_project_path,
+)
+from arxiv_research_scout.report_writer import (
+    resolve_reports_dir,
 )
 from arxiv_research_scout.runner import (
     print_scan_result,
@@ -28,22 +34,17 @@ from arxiv_research_scout.runner import (
 from arxiv_research_scout.state_manager import (
     load_state,
 )
-
-from arxiv_research_scout.report_writer import (
-    resolve_reports_dir,
-)
-
 from arxiv_research_scout.workflow import (
     print_workflow_result,
     run_research_workflow,
     workflow_exit_code,
 )
-from arxiv_research_scout.manual_analysis import (
-    analyze_single_paper,
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
 )
-
-
-@dataclass(frozen=True, slots=True)
 class ProviderStatus:
     """
     Safe runtime information about one LLM provider.
@@ -91,13 +92,16 @@ def resolve_provider_status(
 
     return ProviderStatus(
         settings=settings,
-        api_key_configured=api_key_configured,
+        api_key_configured=(
+            api_key_configured
+        ),
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
     """
-    Build the command-line interface.
+    Build the primary arxiv-scout command-line
+    interface.
     """
 
     parser = argparse.ArgumentParser(
@@ -131,6 +135,49 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Ignore the configured scheduling "
             "interval for this scan."
+        ),
+    )
+
+    # --------------------------------------------------
+    # run
+    # --------------------------------------------------
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help=(
+            "Run the complete research pipeline: "
+            "scan, analyze, report, digest, "
+            "and update state."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Ignore the configured scheduling "
+            "interval for this run."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--provider",
+        choices=sorted(
+            VALID_PROVIDERS
+        ),
+        default=None,
+        help=(
+            "Temporarily override the default "
+            "LLM provider."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Temporarily override the configured "
+            "model for this run."
         ),
     )
 
@@ -177,48 +224,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # --------------------------------------------------
-    # run
-    # --------------------------------------------------
-
-    run_parser = subparsers.add_parser(
-        "run",
-        help=(
-            "Run the complete research pipeline: "
-            "scan, analyze, report, and update state."
-        ),
-    )
-
-    run_parser.add_argument(
-        "--force",
-        action="store_true",
-        help=(
-            "Ignore the configured scheduling "
-            "interval for this run."
-        ),
-    )
-
-    run_parser.add_argument(
-        "--provider",
-        choices=sorted(
-            VALID_PROVIDERS
-        ),
-        default=None,
-        help=(
-            "Temporarily override the default "
-            "LLM provider."
-        ),
-    )
-
-    run_parser.add_argument(
-        "--model",
-        default=None,
-        help=(
-            "Temporarily override the configured "
-            "model for this run."
-        ),
-    )
-
-    # --------------------------------------------------
     # provider
     # --------------------------------------------------
 
@@ -259,13 +264,20 @@ def run_scan_command(
     force: bool,
 ) -> int:
     """
-    Execute the existing arXiv scan pipeline.
+    Execute the scan-only arXiv retrieval pipeline.
+
+    No LLM analysis, reports, digests, or state
+    updates are performed here.
     """
 
     config = load_config()
 
     state_file = resolve_project_path(
-        config["state"]["file"]
+        config[
+            "state"
+        ][
+            "file"
+        ]
     )
 
     state = load_state(
@@ -273,8 +285,8 @@ def run_scan_command(
     )
 
     result = run_scan(
-        config=config,
-        state=state,
+        config,
+        state,
         force=force,
     )
 
@@ -282,74 +294,6 @@ def run_scan_command(
         config,
         result,
     )
-
-    return 0
-
-
-def run_provider_command(
-    *,
-    provider_override: str | None,
-    model_override: str | None,
-) -> int:
-    """
-    Display provider information safely.
-
-    No network/API request is made.
-    """
-
-    config = load_config()
-
-    status = resolve_provider_status(
-        config,
-        provider_override=provider_override,
-        model_override=model_override,
-    )
-
-    settings = status.settings
-
-    print()
-    print(
-        "===== LLM Provider ====="
-    )
-    print()
-
-    print(
-        f"Provider           : "
-        f"{settings.provider}"
-    )
-
-    print(
-        f"Model              : "
-        f"{settings.model}"
-    )
-
-    print(
-        f"API key variable   : "
-        f"{settings.api_key_env}"
-    )
-
-    print(
-        f"API key configured : "
-        f"{'yes' if status.api_key_configured else 'no'}"
-    )
-
-    if settings.base_url:
-        print(
-            f"Base URL           : "
-            f"{settings.base_url}"
-        )
-    else:
-        print(
-            "Base URL           : "
-            "OpenAI SDK default"
-        )
-
-    print(
-        f"Max output tokens  : "
-        f"{settings.max_output_tokens}"
-    )
-
-    print()
 
     return 0
 
@@ -362,12 +306,33 @@ def run_workflow_command(
 ) -> int:
     """
     Execute the complete research workflow.
+
+    Complete successful ordering:
+
+        scan
+            ->
+        paper processing
+            ->
+        individual reports
+            ->
+        digest
+            ->
+        run-level state success
+
+    Partial paper failures result in exit code 1.
+
+    Digest or persistence exceptions deliberately
+    propagate instead of being hidden.
     """
 
     config = load_config()
 
     state_file = resolve_project_path(
-        config["state"]["file"]
+        config[
+            "state"
+        ][
+            "file"
+        ]
     )
 
     reports_dir = resolve_reports_dir(
@@ -384,8 +349,12 @@ def run_workflow_command(
         state_file=state_file,
         reports_dir=reports_dir,
         force=force,
-        provider_override=provider_override,
-        model_override=model_override,
+        provider_override=(
+            provider_override
+        ),
+        model_override=(
+            model_override
+        ),
     )
 
     print_workflow_result(
@@ -397,6 +366,7 @@ def run_workflow_command(
         result
     )
 
+
 def run_analyze_paper_command(
     *,
     arxiv_id: str,
@@ -404,8 +374,11 @@ def run_analyze_paper_command(
     model_override: str | None,
 ) -> int:
     """
-    Analyze exactly one arXiv paper without
-    modifying scheduled-run state.
+    Analyze exactly one explicitly requested arXiv
+    paper.
+
+    Manual analysis deliberately does not modify
+    scheduled-run state.
     """
 
     config = load_config()
@@ -418,8 +391,12 @@ def run_analyze_paper_command(
         arxiv_id,
         config=config,
         reports_root=reports_root,
-        provider_override=provider_override,
-        model_override=model_override,
+        provider_override=(
+            provider_override
+        ),
+        model_override=(
+            model_override
+        ),
     )
 
     processing = result.processing
@@ -479,6 +456,79 @@ def run_analyze_paper_command(
 
     return 0
 
+
+def run_provider_command(
+    *,
+    provider_override: str | None,
+    model_override: str | None,
+) -> int:
+    """
+    Display provider information safely.
+
+    No network/API request is made.
+    """
+
+    config = load_config()
+
+    status = resolve_provider_status(
+        config,
+        provider_override=(
+            provider_override
+        ),
+        model_override=(
+            model_override
+        ),
+    )
+
+    settings = status.settings
+
+    print()
+    print(
+        "===== LLM Provider ====="
+    )
+    print()
+
+    print(
+        f"Provider           : "
+        f"{settings.provider}"
+    )
+
+    print(
+        f"Model              : "
+        f"{settings.model}"
+    )
+
+    print(
+        f"API key variable   : "
+        f"{settings.api_key_env}"
+    )
+
+    print(
+        f"API key configured : "
+        f"{'yes' if status.api_key_configured else 'no'}"
+    )
+
+    if settings.base_url:
+        print(
+            f"Base URL           : "
+            f"{settings.base_url}"
+        )
+    else:
+        print(
+            "Base URL           : "
+            "OpenAI SDK default"
+        )
+
+    print(
+        f"Max output tokens  : "
+        f"{settings.max_output_tokens}"
+    )
+
+    print()
+
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
 ) -> int:
@@ -497,9 +547,9 @@ def main(
             force=args.force,
         )
 
-    if args.command == "analyze-paper":
-        return run_analyze_paper_command(
-            arxiv_id=args.arxiv_id,
+    if args.command == "run":
+        return run_workflow_command(
+            force=args.force,
             provider_override=(
                 args.provider
             ),
@@ -508,9 +558,9 @@ def main(
             ),
         )
 
-    if args.command == "run":
-        return run_workflow_command(
-            force=args.force,
+    if args.command == "analyze-paper":
+        return run_analyze_paper_command(
+            arxiv_id=args.arxiv_id,
             provider_override=(
                 args.provider
             ),

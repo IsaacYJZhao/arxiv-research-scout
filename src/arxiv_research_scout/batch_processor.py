@@ -4,8 +4,6 @@ from collections.abc import (
     Callable,
     Sequence,
 )
-from copy import deepcopy
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,25 +17,11 @@ from arxiv_research_scout.models import (
 from arxiv_research_scout.paper_transaction import (
     process_and_commit_paper,
 )
-from arxiv_research_scout.state_manager import (
-    mark_run_successful,
-    save_state,
-)
 
 
 TransactionFunction = Callable[
     ...,
     PaperCommitResult,
-]
-
-RunMarkerFunction = Callable[
-    ...,
-    None,
-]
-
-StateSaverFunction = Callable[
-    [Path, dict[str, Any]],
-    None,
 ]
 
 
@@ -50,29 +34,51 @@ def process_paper_batch(
     reports_dir: Path,
     client: Any,
     settings: LLMProviderSettings,
-    now: datetime | None = None,
     transaction: TransactionFunction = (
         process_and_commit_paper
     ),
-    run_marker: RunMarkerFunction = (
-        mark_run_successful
-    ),
-    state_saver: StateSaverFunction = (
-        save_state
-    ),
 ) -> BatchProcessingResult:
     """
-    Process a batch of selected papers.
+    Process all selected papers in one batch.
+
+    Responsibilities of this layer:
+
+        Paper A
+            ->
+        single-paper transaction
+            ->
+        committed or failed
+
+        Paper B
+            ->
+        single-paper transaction
+            ->
+        committed or failed
+
+        ...
 
     Individual paper failures do not stop later
-    papers from being processed.
+    papers from being attempted.
 
-    Run-level success is committed only when every
-    selected paper succeeds.
+    Important transaction boundary:
 
-    An empty batch is considered a successful run
-    because retrieval completed successfully and
-    there was simply no new work to process.
+    This function does NOT call:
+
+        mark_run_successful()
+        save_state() for run-level success
+
+    Each successful single-paper transaction may
+    persist its processed arXiv ID through
+    process_and_commit_paper().
+
+    Run-level success belongs to workflow.py and
+    must happen only after the final digest has
+    been written successfully.
+
+    The BatchProcessingResult field
+    run_marked_successful is retained for backward
+    compatibility, but is always False at this
+    stage.
     """
 
     committed: list[
@@ -113,45 +119,12 @@ def process_paper_batch(
             result
         )
 
-    # A partial batch must not be marked as
-    # successfully completed.
-    if failures:
-        return BatchProcessingResult(
-            committed=tuple(
-                committed
-            ),
-            failures=tuple(
-                failures
-            ),
-            run_marked_successful=False,
-        )
-
-    # Run-level state is also staged transactionally.
-    staged_state = deepcopy(
-        state
-    )
-
-    run_marker(
-        staged_state,
-        now=now,
-    )
-
-    state_saver(
-        state_file,
-        staged_state,
-    )
-
-    # Only expose the new run timestamp in memory
-    # after it has been persisted successfully.
-    state.clear()
-    state.update(
-        staged_state
-    )
-
     return BatchProcessingResult(
         committed=tuple(
             committed
         ),
-        failures=(),
-        run_marked_successful=True,
+        failures=tuple(
+            failures
+        ),
+        run_marked_successful=False,
     )
