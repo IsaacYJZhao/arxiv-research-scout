@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,3 +131,62 @@ class LLMProviderSettings:
     api_key_env: str
     base_url: str | None
     max_output_tokens: int
+
+@dataclass(frozen=True, slots=True)
+class PaperProcessingResult:
+    """
+    Complete in-memory processing result for one paper.
+
+    State is intentionally not updated here.
+    A paper should only be marked as processed after
+    its final report has been written successfully.
+    """
+
+    paper: ArxivPaper
+    context: PaperAnalysisContext
+    analysis: PaperAnalysisResult
+    pdf_error: str | None
+
+@dataclass(frozen=True, slots=True)
+class PaperCommitResult:
+    """
+    Result of one successfully committed paper.
+
+    A commit means:
+    1. paper analysis succeeded;
+    2. report writing succeeded;
+    3. processed state was persisted successfully.
+    """
+
+    processing: PaperProcessingResult
+    report_path: Path
+
+@dataclass(frozen=True, slots=True)
+class PaperProcessingFailure:
+    """
+    Information about one paper that failed during
+    batch processing.
+    """
+
+    arxiv_id: str
+    title: str
+    error: str
+
+
+@dataclass(frozen=True, slots=True)
+class BatchProcessingResult:
+    """
+    Result of processing one selected paper batch.
+    """
+
+    committed: tuple[
+        PaperCommitResult,
+        ...
+    ]
+
+    failures: tuple[
+        PaperProcessingFailure,
+        ...
+    ]
+
+    run_marked_successful: bool
