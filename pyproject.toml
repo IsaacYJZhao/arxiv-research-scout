@@ -18,8 +18,12 @@ authors = [
 dependencies = [
     "requests>=2.32,<3",
     "PyYAML>=6,<7",
+    "pypdf>=5,<7",
+    "openai>=3,<4",
 ]
 
+[project.scripts]
+arxiv-scout = "arxiv_research_scout.cli:main"
 
 [project.optional-dependencies]
 dev = [

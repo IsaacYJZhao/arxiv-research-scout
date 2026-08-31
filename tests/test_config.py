@@ -68,3 +68,37 @@ def test_relevance_values_are_valid() -> None:
 
     assert relevance["core_terms"]
     assert relevance["target_terms"]
+
+def test_pdf_values_are_valid() -> None:
+    config = load_config()
+
+    pdf = config["pdf"]
+
+    assert pdf["max_download_mb"] >= 1
+    assert pdf["max_text_chars"] >= 1000
+    assert pdf["timeout_seconds"] >= 1
+    assert pdf["max_attempts"] >= 1
+
+def test_llm_values_are_valid() -> None:
+    config = load_config()
+
+    llm = config["llm"]
+
+    assert llm["max_context_chars"] >= 1000
+
+    assert llm["default_provider"] in {
+        "openai",
+        "deepseek",
+    }
+
+    assert llm["max_output_tokens"] >= 1
+
+    assert llm["openai"]["model"]
+
+    assert llm["deepseek"]["model"]
+
+    assert (
+        llm["deepseek"]["base_url"]
+        ==
+        "https://api.deepseek.com"
+    )
