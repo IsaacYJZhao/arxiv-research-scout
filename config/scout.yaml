@@ -31,7 +31,7 @@ pdf:
   max_attempts: 3
 
 llm:
-  default_provider: "openai"
+  default_provider: "deepseek"
 
   max_context_chars: 45000
   max_output_tokens: 2500
