@@ -1,0 +1,11 @@
+# Normalize text files in the repository.
+* text=auto
+
+# Source code and project configuration use LF.
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
