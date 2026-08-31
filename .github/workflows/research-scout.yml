@@ -3,8 +3,19 @@ name: arXiv Research Scout
 on:
   workflow_dispatch:
 
+  schedule:
+    # GitHub Actions cron uses UTC.
+    # Wake up once every day at 08:17 UTC.
+    # The Python application itself decides whether
+    # run_every_days has elapsed.
+    - cron: "17 8 * * *"
+
 permissions:
   contents: write
+
+concurrency:
+  group: arxiv-research-scout
+  cancel-in-progress: false
 
 jobs:
   research-scout:
@@ -54,4 +65,9 @@ jobs:
           fi
 
           git commit -m "Update arXiv research scout results"
-          git push
+
+          # Incorporate any commit that may have reached
+          # main while this workflow was running.
+          git pull --rebase origin main
+
+          git push origin main
