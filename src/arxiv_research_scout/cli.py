@@ -29,6 +29,16 @@ from arxiv_research_scout.state_manager import (
     load_state,
 )
 
+from arxiv_research_scout.report_writer import (
+    resolve_reports_dir,
+)
+
+from arxiv_research_scout.workflow import (
+    print_workflow_result,
+    run_research_workflow,
+    workflow_exit_code,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderStatus:
@@ -118,6 +128,48 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Ignore the configured scheduling "
             "interval for this scan."
+        ),
+    )
+
+    # --------------------------------------------------
+    # run
+    # --------------------------------------------------
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help=(
+            "Run the complete research pipeline: "
+            "scan, analyze, report, and update state."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Ignore the configured scheduling "
+            "interval for this run."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--provider",
+        choices=sorted(
+            VALID_PROVIDERS
+        ),
+        default=None,
+        help=(
+            "Temporarily override the default "
+            "LLM provider."
+        ),
+    )
+
+    run_parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Temporarily override the configured "
+            "model for this run."
         ),
     )
 
@@ -257,6 +309,49 @@ def run_provider_command(
     return 0
 
 
+def run_workflow_command(
+    *,
+    force: bool,
+    provider_override: str | None,
+    model_override: str | None,
+) -> int:
+    """
+    Execute the complete research workflow.
+    """
+
+    config = load_config()
+
+    state_file = resolve_project_path(
+        config["state"]["file"]
+    )
+
+    reports_dir = resolve_reports_dir(
+        config
+    )
+
+    state = load_state(
+        state_file
+    )
+
+    result = run_research_workflow(
+        config=config,
+        state=state,
+        state_file=state_file,
+        reports_dir=reports_dir,
+        force=force,
+        provider_override=provider_override,
+        model_override=model_override,
+    )
+
+    print_workflow_result(
+        config,
+        result,
+    )
+
+    return workflow_exit_code(
+        result
+    )
+
 def main(
     argv: Sequence[str] | None = None,
 ) -> int:
@@ -273,6 +368,18 @@ def main(
     if args.command == "scan":
         return run_scan_command(
             force=args.force,
+        )
+
+
+    if args.command == "run":
+        return run_workflow_command(
+            force=args.force,
+            provider_override=(
+                args.provider
+            ),
+            model_override=(
+                args.model
+            ),
         )
 
     if args.command == "provider":

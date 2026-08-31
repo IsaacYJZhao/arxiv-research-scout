@@ -125,3 +125,28 @@ def test_cli_parser_accepts_provider_and_model() -> None:
     assert args.model == (
         "deepseek-v4-flash"
     )
+
+def test_cli_parser_accepts_full_run() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "run",
+            "--force",
+            "--provider",
+            "deepseek",
+            "--model",
+            "temporary-model",
+        ]
+    )
+
+    assert args.command == "run"
+    assert args.force
+
+    assert args.provider == (
+        "deepseek"
+    )
+
+    assert args.model == (
+        "temporary-model"
+    )
