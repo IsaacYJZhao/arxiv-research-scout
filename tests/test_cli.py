@@ -150,3 +150,27 @@ def test_cli_parser_accepts_full_run() -> None:
     assert args.model == (
         "temporary-model"
     )
+
+def test_cli_parser_accepts_analyze_paper() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "analyze-paper",
+            "2608.16855v1",
+            "--provider",
+            "deepseek",
+        ]
+    )
+
+    assert args.command == (
+        "analyze-paper"
+    )
+
+    assert args.arxiv_id == (
+        "2608.16855v1"
+    )
+
+    assert args.provider == (
+        "deepseek"
+    )

@@ -190,3 +190,17 @@ class BatchProcessingResult:
     ]
 
     run_marked_successful: bool
+
+@dataclass(frozen=True, slots=True)
+class ManualAnalysisResult:
+    """
+    Result of an explicitly requested single-paper
+    analysis.
+
+    Manual analysis does not modify scheduled-run
+    state.
+    """
+
+    processing: PaperProcessingResult
+    report_path: Path
+    settings: LLMProviderSettings

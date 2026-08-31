@@ -52,3 +52,6 @@ Thumbs.db
 # --------------------------------------------------
 *.tmp
 *.log
+
+# Manual provider comparison reports
+reports/manual/

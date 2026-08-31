@@ -38,6 +38,9 @@ from arxiv_research_scout.workflow import (
     run_research_workflow,
     workflow_exit_code,
 )
+from arxiv_research_scout.manual_analysis import (
+    analyze_single_paper,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +131,48 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Ignore the configured scheduling "
             "interval for this scan."
+        ),
+    )
+
+    # --------------------------------------------------
+    # analyze-paper
+    # --------------------------------------------------
+
+    analyze_parser = subparsers.add_parser(
+        "analyze-paper",
+        help=(
+            "Analyze one explicitly requested "
+            "arXiv paper without updating "
+            "scheduled-run state."
+        ),
+    )
+
+    analyze_parser.add_argument(
+        "arxiv_id",
+        help=(
+            "arXiv paper ID, for example "
+            "2608.16855v1."
+        ),
+    )
+
+    analyze_parser.add_argument(
+        "--provider",
+        choices=sorted(
+            VALID_PROVIDERS
+        ),
+        default=None,
+        help=(
+            "Temporarily override the default "
+            "LLM provider."
+        ),
+    )
+
+    analyze_parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Temporarily override the configured "
+            "model."
         ),
     )
 
@@ -352,6 +397,88 @@ def run_workflow_command(
         result
     )
 
+def run_analyze_paper_command(
+    *,
+    arxiv_id: str,
+    provider_override: str | None,
+    model_override: str | None,
+) -> int:
+    """
+    Analyze exactly one arXiv paper without
+    modifying scheduled-run state.
+    """
+
+    config = load_config()
+
+    reports_root = resolve_reports_dir(
+        config
+    )
+
+    result = analyze_single_paper(
+        arxiv_id,
+        config=config,
+        reports_root=reports_root,
+        provider_override=provider_override,
+        model_override=model_override,
+    )
+
+    processing = result.processing
+    analysis = processing.analysis
+
+    print()
+    print(
+        "===== Single Paper Analysis ====="
+    )
+    print()
+
+    print(
+        f"arXiv ID       : "
+        f"{processing.paper.arxiv_id}"
+    )
+
+    print(
+        f"Title          : "
+        f"{processing.paper.title}"
+    )
+
+    print(
+        f"Provider       : "
+        f"{result.settings.provider}"
+    )
+
+    print(
+        f"Model          : "
+        f"{result.settings.model}"
+    )
+
+    print(
+        f"Evidence level : "
+        f"{analysis.evidence_level}"
+    )
+
+    print(
+        f"Confidence     : "
+        f"{analysis.confidence}"
+    )
+
+    if processing.pdf_error is None:
+        print(
+            "PDF status     : available"
+        )
+    else:
+        print(
+            "PDF status     : fallback used"
+        )
+
+    print(
+        f"Report         : "
+        f"{result.report_path}"
+    )
+
+    print()
+
+    return 0
+
 def main(
     argv: Sequence[str] | None = None,
 ) -> int:
@@ -370,6 +497,16 @@ def main(
             force=args.force,
         )
 
+    if args.command == "analyze-paper":
+        return run_analyze_paper_command(
+            arxiv_id=args.arxiv_id,
+            provider_override=(
+                args.provider
+            ),
+            model_override=(
+                args.model
+            ),
+        )
 
     if args.command == "run":
         return run_workflow_command(

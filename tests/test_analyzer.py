@@ -8,6 +8,7 @@ from arxiv_research_scout.analyzer import (
     build_analysis_prompt,
     build_evidence_text,
     determine_evidence_level,
+    describe_output_language,
     extract_response_json,
 )
 
@@ -18,11 +19,11 @@ from arxiv_research_scout.models import (
 
 
 def make_context(
-    *,
-    methodology: str = "Method evidence.",
-    experiments: str = "Experiment evidence.",
-    results: str = "Result evidence.",
-    pdf_text_available: bool = True,
+        *,
+        methodology: str = "Method evidence.",
+        experiments: str = "Experiment evidence.",
+        results: str = "Result evidence.",
+        pdf_text_available: bool = True,
 ) -> PaperAnalysisContext:
     return PaperAnalysisContext(
         arxiv_id="2608.10000v1",
@@ -127,18 +128,57 @@ def test_prompt_contains_evidence_rules() -> None:
         )
     )
 
-    assert "Never invent datasets" in (
-        system_prompt
+    normalized_system_prompt = (
+        " ".join(
+            system_prompt.split()
+        )
     )
 
     assert (
-        "evidence_level MUST be exactly"
-        in system_prompt
+            "Never invent or assume"
+            in normalized_system_prompt
     )
 
-    assert context.title in user_prompt
-    assert context.abstract in user_prompt
+    assert (
+            "- datasets;"
+            in normalized_system_prompt
+    )
 
+    assert (
+            "- numerical results;"
+            in normalized_system_prompt
+    )
+
+    assert (
+            "- baselines;"
+            in normalized_system_prompt
+    )
+
+    assert (
+            "- ablation studies;"
+            in normalized_system_prompt
+    )
+
+    assert (
+            "evidence_level MUST be exactly"
+            in normalized_system_prompt
+    )
+
+    assert (
+            "Do not include information from outside "
+            "the supplied paper evidence."
+            in normalized_system_prompt
+    )
+
+    assert (
+            context.title
+            in user_prompt
+    )
+
+    assert (
+            context.abstract
+            in user_prompt
+    )
 
 def test_extract_response_json() -> None:
     response = SimpleNamespace(
@@ -172,8 +212,8 @@ def test_analyze_with_client_uses_common_schema() -> None:
 
     class FakeResponses:
         def create(
-            self,
-            **kwargs,
+                self,
+                **kwargs,
         ):
             calls.append(kwargs)
 
@@ -217,22 +257,101 @@ def test_analyze_with_client_uses_common_schema() -> None:
 
     request = calls[0]
 
+    assert request["reasoning"] == {
+        "effort": "none",
+    }
+
     assert request["model"] == (
         "test-model"
     )
 
     assert request[
-        "max_output_tokens"
-    ] == 2500
+               "max_output_tokens"
+           ] == 2500
 
     assert (
-        request["text"]["format"]["type"]
-        ==
-        "json_schema"
+            request["text"]["format"]["type"]
+            ==
+            "json_schema"
     )
 
     assert (
-        request["text"]["format"]["name"]
-        ==
-        "paper_analysis"
+            request["text"]["format"]["name"]
+            ==
+            "paper_analysis"
+    )
+
+
+def test_incomplete_response_is_rejected() -> None:
+    response = SimpleNamespace(
+        status="incomplete",
+        incomplete_details={
+            "reason": "max_output_tokens",
+        },
+        output_text=(
+            '{"methodology": "truncated'
+        ),
+    )
+
+    with pytest.raises(
+            ValueError,
+            match="LLM response was incomplete",
+    ):
+        extract_response_json(
+            response
+        )
+
+
+def test_zh_cn_language_is_explicit() -> None:
+    result = describe_output_language(
+        "zh-CN"
+    )
+
+    assert (
+        "Simplified Chinese"
+        in result
+    )
+
+    assert (
+        "zh-CN"
+        in result
+    )
+
+
+def test_prompt_requires_simplified_chinese() -> None:
+    context = make_context()
+
+    system_prompt, _ = (
+        build_analysis_prompt(
+            context,
+            output_language="zh-CN",
+            max_context_chars=5000,
+        )
+    )
+
+    normalized_prompt = (
+        " ".join(
+            system_prompt.split()
+        )
+    )
+
+    assert (
+        "Simplified Chinese"
+        in normalized_prompt
+    )
+
+    assert (
+        "zh-CN"
+        in normalized_prompt
+    )
+
+    assert (
+        "This language requirement "
+        "is mandatory."
+        in normalized_prompt
+    )
+
+    assert (
+        "key_results"
+        in normalized_prompt
     )
