@@ -8,6 +8,7 @@ topic:
     OR all:"LIDC"
     OR all:"LNDb"
     OR all:"LUNA16"
+    OR all:"NODE21"
     OR all:"NLST")
     AND
     (all:"deep learning"
@@ -73,16 +74,18 @@ relevance:
   # otherwise on-topic paper.
   require_core: true
 
+  # Core terms are the topic gate, so they must be
+  # specific to lung nodules. Dataset names that are
+  # widely reused outside this topic (LIDC, NLST) are
+  # supporting signals instead: a low-dose CT denoising
+  # paper that merely simulates on LIDC-IDRI is not a
+  # nodule paper.
   core_terms:
     - "lung nodule"
     - "pulmonary nodule"
-    - "lung cancer screening"
-    # "LIDC" also matches "LIDC-IDRI", because
-    # contains_term() treats "-" as a word boundary.
-    - "LIDC"
     - "LUNA16"
     - "LNDb"
-    - "NLST"
+    - "NODE21"
 
   target_terms:
     - "detection"
@@ -102,6 +105,13 @@ relevance:
     - "CT"
     - "3D"
     - "deep learning"
+    # "LIDC" also matches "LIDC-IDRI", because
+    # contains_term() treats "-" as a word boundary.
+    - "LIDC"
+    - "NLST"
+    - "lung cancer screening"
+    - "low-dose CT"
+    - "LDCT"
 
   # These now only push a paper down the ranking.
   # They can no longer exclude it.
