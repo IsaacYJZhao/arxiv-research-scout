@@ -6,7 +6,9 @@ The project is designed for both local execution and unattended GitHub Actions w
 
 ## Features
 
-* Search arXiv using configurable research topics and categories.
+* Search arXiv and Europe PMC from one configurable topic.
+* Recognize the same paper arriving from more than one source and analyze it once.
+* Prefer papers whose full text can actually be downloaded when slots are limited.
 * Filter papers by publication window.
 * Deduplicate arXiv versions by normalized paper ID.
 * Skip papers that have already been successfully processed.
@@ -253,6 +255,74 @@ reports/manual/<provider>/
 
 `reports/manual/` is ignored by Git because it is intended for local testing and provider comparison.
 
+## Retrieval Sources
+
+Two sources are queried per run, in this order:
+
+```text
+arXiv        preprints, mostly cs.CV / eess.IV / cs.LG
+Europe PMC   journal articles, PubMed records, preprints
+```
+
+Order matters. Results are concatenated and then deduplicated keeping the first occurrence, and an arXiv preprint usually has a downloadable PDF while the journal record of the same work often does not. A full text produces a far stronger analysis than an abstract, so the preprint should win.
+
+Europe PMC is what makes the scout usable for a medical imaging topic. For 3D CT lung nodule detection over the same two-week window, arXiv returned one candidate and Europe PMC returned ten, including work published in imaging journals that never appears on arXiv at all.
+
+### Why each source keeps its own query
+
+The query languages differ, and translating between them loses precision, so `config/scout.yaml` holds one query per source:
+
+```yaml
+topic:
+  arxiv_query: >
+    (all:"lung nodule" OR all:"pulmonary nodule") AND ...
+
+sources:
+  europepmc:
+    enabled: true
+    max_candidates: 50
+    query: >
+      (TITLE_ABS:"lung nodule" OR TITLE_ABS:"pulmonary nodule")
+      AND (TITLE_ABS:"deep learning" OR TITLE_ABS:"computed tomography")
+```
+
+The publication window is added to the Europe PMC query automatically from `schedule.lookback_days`. It has to be applied server-side: Europe PMC sorts by relevance by default and holds tens of millions of records, so filtering by date only after retrieval would return mostly old work.
+
+Setting `enabled: false`, or removing the `sources` block entirely, falls back to arXiv alone.
+
+### Cross-source identity
+
+Papers are identified by a key rather than by an arXiv ID:
+
+```text
+doi:10.1007/s10278-026-02237-y
+arxiv:2608.16855
+europepmc:42675277
+```
+
+A DOI wins when one exists, because that is what an arXiv preprint and its published journal version have in common. Europe PMC reports the DataCite DOI of arXiv preprints (`10.48550/arXiv.2608.16855`); those map back to the `arxiv:` key, so a preprint indexed by both sources is one paper, not two.
+
+### Closed-access articles
+
+Most journal articles indexed by Europe PMC are paywalled. They are still retrieved, ranked and analyzed, but only from their abstract, and their report says so:
+
+```text
+- **PDF status:** No full text available; abstract only
+- **Evidence level:** abstract_only
+```
+
+Knowing that a paper exists is what matters for a literature review; the full text can be obtained separately. When more papers pass relevance than `retrieval.max_papers` allows, full-text-available papers take the slots first.
+
+### Adding another source
+
+Each source is one module under `src/arxiv_research_scout/sources/` that returns `PaperRecord` objects. Nothing downstream knows which database a paper came from. To add one:
+
+1. Write the adapter module and its query translation.
+2. Register it in `runner.collect_candidates()`.
+3. Add its block to `sources:` in `config/scout.yaml`.
+
+A source that fails is recorded in the digest and skipped, not raised. Losing one source degrades a run; aborting the run loses the papers every other source found.
+
 ## Where Results Live
 
 This is the part that most often causes confusion, so it is worth stating explicitly.
@@ -334,11 +404,21 @@ topic:
     - "eess.IV"
     - "cs.LG"
 
+sources:
+  arxiv:
+    enabled: true
+  europepmc:
+    enabled: true
+    max_candidates: 50
+    query: >
+      ...
+
 schedule:
   run_every_days: 3
   lookback_days: 14
 
 retrieval:
+  # arXiv only; Europe PMC has its own max_candidates.
   max_candidates: 100
   max_papers: 8
 
@@ -443,6 +523,13 @@ Evidence level is determined by local code rather than by the LLM.
 
 ### Per-paper Reports
 
+Reports are named after the record key, so papers from different databases cannot collide:
+
+```text
+reports/arxiv_2608.14766.md
+reports/europepmc_42675277.md
+```
+
 Successfully processed papers produce Markdown reports containing:
 
 ```text
@@ -489,13 +576,15 @@ Example:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "last_successful_run_utc": null,
-  "processed_ids": []
+  "processed_ids": ["arxiv:2608.12345", "doi:10.1007/s10278-1"]
 }
 ```
 
-arXiv version suffixes are normalized for processed-paper identity. For example, `2608.12345v1`, `2608.12345v2`, and `2608.12345v3` are treated as versions of the same paper.
+`processed_ids` holds the cross-source keys described under Retrieval Sources. arXiv version suffixes are normalized, so `2608.12345v1`, `2608.12345v2`, and `2608.12345v3` are the same paper.
+
+Schema 1 stored bare arXiv IDs. `load_state()` migrates those to `arxiv:` keys automatically and idempotently, so an existing state file keeps working and already-analyzed papers are not analyzed again.
 
 This file must have exactly one writer. Running the pipeline both locally and in GitHub Actions makes the two copies diverge, which surfaces later as a rebase conflict on `state.json` or as papers analyzed twice. Pick one scheduler; see the `notify_bridge.py` section above.
 
@@ -644,6 +733,9 @@ arxiv-research-scout/
 │       ├── report_writer.py
 │       ├── runner.py
 │       ├── section_parser.py
+│       ├── sources/
+│       │   ├── __init__.py
+│       │   └── europepmc.py
 │       ├── state_manager.py
 │       └── workflow.py
 ├── tests/
@@ -694,6 +786,8 @@ Network services are mocked in unit tests, so the normal test suite does not con
 **Every digest reports zero papers.** Read the retrieval statistics in the digest. `Candidates retrieved` at zero means the query matched nothing; a non-zero value collapsing to `Recent papers: 0` means `lookback_days` is narrower than the topic's publication rate; `Relevant papers: 0` with a non-zero `Unprocessed papers` means the relevance rules rejected everything. `arxiv-scout scan --force` reproduces all of this without spending API credits.
 
 **`notify_bridge.py` reports that sync is blocked.** The working tree has uncommitted changes and cannot fast-forward. Commit or stash them, then run the script again.
+
+**One source returned nothing.** The digest lists candidates per source, and a failed source appears there with its error. A source that fails does not stop the run, so an empty digest with a `europepmc FAILED` line means the other sources still ran.
 
 **A scheduled run turned red on GitHub.** Exit code 1 means at least one paper failed during analysis. The digest for that run was still written and lists the failures; `last_successful_run_utc` was deliberately left unchanged so the failed papers are retried on the next wake-up.
 

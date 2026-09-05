@@ -1,5 +1,5 @@
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
 )
 
 from arxiv_research_scout.relevance import (
@@ -12,10 +12,10 @@ from arxiv_research_scout.relevance import (
 def make_paper(
     title: str,
     abstract: str,
-    arxiv_id: str = "2608.10000v1",
-) -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id=arxiv_id,
+    record_id: str = "2608.10000v1",
+) -> PaperRecord:
+    return PaperRecord(
+        record_id=record_id,
         title=title,
         authors=("Example Author",),
         abstract=abstract,
@@ -24,11 +24,11 @@ def make_paper(
         categories=("cs.CV",),
         abs_url=(
             f"https://arxiv.org/abs/"
-            f"{arxiv_id}"
+            f"{record_id}"
         ),
         pdf_url=(
             f"https://arxiv.org/pdf/"
-            f"{arxiv_id}"
+            f"{record_id}"
         ),
     )
 
@@ -151,7 +151,7 @@ def test_rank_relevant_papers_filters_low_scores() -> None:
         abstract=(
             "Deep learning detection method."
         ),
-        arxiv_id="2608.10001v1",
+        record_id="2608.10001v1",
     )
 
     low = make_paper(
@@ -161,7 +161,7 @@ def test_rank_relevant_papers_filters_low_scores() -> None:
         abstract=(
             "Prompt-based segmentation."
         ),
-        arxiv_id="2608.10002v1",
+        record_id="2608.10002v1",
     )
 
     ranked = rank_relevant_papers(
@@ -171,7 +171,7 @@ def test_rank_relevant_papers_filters_low_scores() -> None:
 
     assert len(ranked) == 1
 
-    assert ranked[0][0].arxiv_id == (
+    assert ranked[0][0].record_id == (
         "2608.10001v1"
     )
 

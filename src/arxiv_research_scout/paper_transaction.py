@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     PaperCommitResult,
     PaperProcessingResult,
@@ -33,7 +33,7 @@ ReportWriterFunction = Callable[
 ]
 
 StateMarkerFunction = Callable[
-    [dict[str, Any], str],
+    [dict[str, Any], PaperRecord],
     None,
 ]
 
@@ -44,7 +44,7 @@ StateSaverFunction = Callable[
 
 
 def process_and_commit_paper(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     *,
     config: dict,
     state: dict[str, Any],
@@ -103,7 +103,7 @@ def process_and_commit_paper(
 
     state_marker(
         staged_state,
-        paper.arxiv_id,
+        paper,
     )
 
     state_saver(

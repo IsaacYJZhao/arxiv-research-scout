@@ -50,6 +50,7 @@ notify_bridge.py — 把 arxiv-research-scout 的检索结果送到桌宠的通�
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -63,6 +64,11 @@ DIGESTS_DIR = REPORTS_DIR / "digests"
 
 # 手动对比用的报告，不属于自动检索产物，不参与通知
 EXCLUDED_REPORT_DIRS = {"manual"}
+
+# 必须和 report_writer.safe_report_filename() 一致：
+# processed_ids 里存的是 arxiv:2608.16855 这样的记录键，
+# 冒号在 Windows 文件名里非法，报告落盘时被换成了下划线。
+UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
 APP_NAME = "DesktopPetMemo"
 
@@ -126,19 +132,25 @@ def list_digests() -> set[str]:
     return {path.name for path in DIGESTS_DIR.glob("*.md")}
 
 
-def find_report_path(arxiv_id: str) -> Path | None:
+def find_report_path(record_key: str) -> Path | None:
     """
-    在 reports/ 下按 arXiv ID 找报告。
+    在 reports/ 下按记录键找报告。
 
-    processed_ids 里存的是去掉版本号的 ID（2608.16855），而报告文件名
-    带版本号（2608.16855v1.md），所以用前缀匹配。递归查找是为了兼容
-    以后按 provider 或年份分子目录的情况；reports/manual/ 是本地手动
-    对比产物，不算自动检索结果，排除掉。
+    processed_ids 里存的是跨源记录键（arxiv:2608.16855、
+    europepmc:42675277、doi:10.1007/...），报告文件名是同一个键做过
+    文件名转义的结果。前缀匹配是为了容忍将来文件名后面再挂后缀；
+    递归查找是为了兼容按 provider 或年份分子目录的情况；
+    reports/manual/ 是本地手动对比产物，不算自动检索结果，排除掉。
     """
     if not REPORTS_DIR.is_dir():
         return None
 
-    safe = arxiv_id.replace("/", "_")
+    safe = UNSAFE_FILENAME_CHARS.sub(
+        "_", record_key.strip()
+    ).strip("._-")
+
+    if not safe:
+        return None
 
     candidates = [
         path
@@ -354,11 +366,13 @@ def notify_new_results(
     lines: list[str] = []
     open_path: str | None = None
 
-    for arxiv_id in new_ids[:6]:
-        report = find_report_path(arxiv_id)
+    for record_key in new_ids[:6]:
+        report = find_report_path(record_key)
         if report is not None and open_path is None:
             open_path = str(report)
-        lines.append(f"{arxiv_id}（已生成报告）" if report else arxiv_id)
+        lines.append(
+            f"{record_key}（已生成报告）" if report else record_key
+        )
 
     if len(new_ids) > 6:
         lines.append(f"…等共 {len(new_ids)} 篇")

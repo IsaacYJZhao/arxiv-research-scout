@@ -10,7 +10,7 @@ from arxiv_research_scout.digest_writer import (
     write_digest,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     BatchProcessingResult,
     LLMProviderSettings,
     PaperAnalysisContext,
@@ -35,9 +35,9 @@ FIXED_TIME = datetime(
 )
 
 
-def make_paper() -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.10000v1",
+def make_paper() -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.10000v1",
         title="Example Lung Nodule Paper",
         authors=(
             "Alice Example",
@@ -64,7 +64,7 @@ def make_commit(
     paper = make_paper()
 
     context = PaperAnalysisContext(
-        arxiv_id=paper.arxiv_id,
+        record_id=paper.record_id,
         title=paper.title,
         authors=paper.authors,
         abstract=paper.abstract,
@@ -238,7 +238,7 @@ def test_digest_contains_failures(
     tmp_path: Path,
 ) -> None:
     failure = PaperProcessingFailure(
-        arxiv_id="2608.99999v1",
+        record_id="2608.99999v1",
         title="Failed Paper",
         error="RuntimeError: API failed",
     )
@@ -341,6 +341,6 @@ def test_write_digest_is_atomic(
     )
 
     assert (
-        "# arXiv Research Digest"
+        "# Research Digest"
         in content
     )

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 import requests
 
-from arxiv_research_scout.models import ArxivPaper
+from arxiv_research_scout.models import PaperRecord
 
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
@@ -103,7 +103,7 @@ def parse_arxiv_id(entry_url: str) -> str:
     return entry_url.rstrip("/").split("/")[-1]
 
 
-def parse_entry(entry: ET.Element) -> ArxivPaper:
+def parse_entry(entry: ET.Element) -> PaperRecord:
     """
     Parse one Atom <entry> element.
     """
@@ -204,8 +204,26 @@ def parse_entry(entry: ET.Element) -> ArxivPaper:
 
             break
 
-    return ArxivPaper(
-        arxiv_id=parse_arxiv_id(abs_url),
+    # Authors may declare the DOI of the published
+    # version. When they do, the preprint and the
+    # journal article collapse into one paper instead
+    # of being analyzed twice.
+    doi = clean_text(
+        entry.findtext(
+            "arxiv:doi",
+            namespaces=NAMESPACES,
+        )
+    )
+
+    venue = clean_text(
+        entry.findtext(
+            "arxiv:journal_ref",
+            namespaces=NAMESPACES,
+        )
+    )
+
+    return PaperRecord(
+        record_id=parse_arxiv_id(abs_url),
         title=title,
         authors=authors,
         abstract=abstract,
@@ -214,12 +232,16 @@ def parse_entry(entry: ET.Element) -> ArxivPaper:
         categories=categories,
         abs_url=abs_url,
         pdf_url=pdf_url,
+        source="arxiv",
+        doi=doi,
+        venue=venue,
+        full_text_available=bool(pdf_url),
     )
 
 
 def parse_feed(
     xml_content: bytes,
-) -> list[ArxivPaper]:
+) -> list[PaperRecord]:
     """
     Parse an arXiv Atom feed.
     """
@@ -273,7 +295,7 @@ def get_retry_delay_seconds(
 def search_arxiv(
     query: str,
     max_results: int = 20,
-) -> list[ArxivPaper]:
+) -> list[PaperRecord]:
     """
     Search arXiv and return standardized paper objects.
 

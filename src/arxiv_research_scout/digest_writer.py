@@ -92,7 +92,7 @@ def build_digest_markdown(
     )
 
     lines = [
-        "# arXiv Research Digest",
+        "# Research Digest",
         "",
         "## Run Summary",
         "",
@@ -115,6 +115,21 @@ def build_digest_markdown(
         "",
         "## Retrieval Summary",
         "",
+    ]
+
+    for source_name, count in scan.source_counts:
+        lines.append(
+            f"- **Candidates from "
+            f"{source_name}:** {count}"
+        )
+
+    for source_name, message in scan.source_errors:
+        lines.append(
+            f"- **{source_name} FAILED:** "
+            f"{message}"
+        )
+
+    lines += [
         (
             f"- **Candidates retrieved:** "
             f"{scan.candidate_count}"
@@ -182,8 +197,29 @@ def build_digest_markdown(
                 ),
                 "",
                 (
-                    f"- **arXiv ID:** "
-                    f"{paper.arxiv_id}"
+                    f"- **Source:** "
+                    f"{paper.source}"
+                    + (
+                        f" | {paper.venue}"
+                        if paper.venue
+                        else ""
+                    )
+                ),
+                (
+                    f"- **Paper ID:** "
+                    f"{paper.record_id}"
+                ),
+                (
+                    f"- **DOI:** "
+                    f"{paper.doi or 'Not reported'}"
+                ),
+                (
+                    f"- **Evidence:** "
+                    + (
+                        "full text"
+                        if paper.full_text_available
+                        else "abstract only"
+                    )
                 ),
                 (
                     f"- **Authors:** "
@@ -281,7 +317,7 @@ def build_digest_markdown(
             lines.extend(
                 [
                     (
-                        f"### {failure.arxiv_id} "
+                        f"### {failure.record_id} "
                         f"— {failure.title}"
                     ),
                     "",

@@ -4,16 +4,16 @@ from arxiv_research_scout.analysis_context import (
 )
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     PaperSections,
 )
 
 
 def make_paper(
     abstract: str = "Metadata abstract.",
-) -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.10000v1",
+) -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.10000v1",
         title="Example Paper",
         authors=("Alice Example",),
         abstract=abstract,
@@ -95,7 +95,7 @@ def test_build_analysis_context() -> None:
         sections,
     )
 
-    assert context.arxiv_id == (
+    assert context.record_id == (
         "2608.10000v1"
     )
 

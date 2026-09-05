@@ -482,7 +482,7 @@ def print_workflow_result(
         ):
             print(
                 f"- "
-                f"{failure.arxiv_id} "
+                f"{failure.record_id} "
                 f"| "
                 f"{failure.title}"
             )

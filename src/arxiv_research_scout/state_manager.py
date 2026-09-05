@@ -10,12 +10,23 @@ from pathlib import Path
 from typing import Any
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
 )
 
 from arxiv_research_scout.paper_filters import (
-    normalize_arxiv_id,
+    record_key,
 )
+
+
+# Schema history:
+#
+#   1: processed_ids held bare arXiv IDs, because arXiv
+#      was the only retrieval source.
+#
+#   2: processed_ids holds cross-source record keys, so
+#      that the same work retrieved from two sources is
+#      recognized as already processed.
+SCHEMA_VERSION = 2
 
 
 def default_state() -> dict[str, Any]:
@@ -24,17 +35,64 @@ def default_state() -> dict[str, Any]:
     """
 
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "last_successful_run_utc": None,
         "processed_ids": [],
     }
+
+
+def migrate_state(
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Bring a state document up to the current schema.
+
+    Schema 1 stored bare arXiv IDs. Those become
+    arxiv:<id> keys so that they keep matching the
+    papers they were recorded for.
+
+    Entries that already look like keys are left alone,
+    which makes this migration safe to run repeatedly.
+    """
+
+    version = state.get(
+        "schema_version",
+        1,
+    )
+
+    if version >= SCHEMA_VERSION:
+        return state
+
+    migrated_ids: list[str] = []
+
+    for entry in state.get(
+        "processed_ids",
+        [],
+    ):
+        text = str(entry).strip()
+
+        if not text:
+            continue
+
+        if ":" in text:
+            migrated_ids.append(text)
+            continue
+
+        migrated_ids.append(
+            f"arxiv:{text}"
+        )
+
+    state["processed_ids"] = migrated_ids
+    state["schema_version"] = SCHEMA_VERSION
+
+    return state
 
 
 def load_state(
     state_file: Path,
 ) -> dict[str, Any]:
     """
-    Load state from disk.
+    Load state from disk, migrating it if necessary.
 
     If the file does not exist, return a fresh state.
     """
@@ -54,7 +112,7 @@ def load_state(
             "a JSON object."
         )
 
-    return state
+    return migrate_state(state)
 
 
 def save_state(
@@ -98,27 +156,23 @@ def save_state(
 
 def has_processed_paper(
     state: dict[str, Any],
-    arxiv_id: str,
+    paper: PaperRecord,
 ) -> bool:
     """
     Check whether a paper has already been
     successfully processed.
     """
 
-    normalized_id = normalize_arxiv_id(
-        arxiv_id
-    )
-
-    return normalized_id in state.get(
+    return record_key(paper) in state.get(
         "processed_ids",
         [],
     )
 
 
 def filter_unprocessed_papers(
-    papers: list[ArxivPaper],
+    papers: list[PaperRecord],
     state: dict[str, Any],
-) -> list[ArxivPaper]:
+) -> list[PaperRecord]:
     """
     Keep only papers that have not been
     successfully processed before.
@@ -129,32 +183,28 @@ def filter_unprocessed_papers(
         for paper in papers
         if not has_processed_paper(
             state,
-            paper.arxiv_id,
+            paper,
         )
     ]
 
 
 def mark_paper_processed(
     state: dict[str, Any],
-    arxiv_id: str,
+    paper: PaperRecord,
 ) -> None:
     """
     Mark one paper as successfully processed.
     """
 
-    normalized_id = normalize_arxiv_id(
-        arxiv_id
-    )
+    key = record_key(paper)
 
     processed_ids = state.setdefault(
         "processed_ids",
         [],
     )
 
-    if normalized_id not in processed_ids:
-        processed_ids.append(
-            normalized_id
-        )
+    if key not in processed_ids:
+        processed_ids.append(key)
 
 
 def is_run_due(

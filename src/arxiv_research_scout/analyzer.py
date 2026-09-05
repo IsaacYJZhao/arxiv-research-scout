@@ -409,7 +409,7 @@ paper evidence.
     user_prompt = f"""
 # Paper Metadata
 
-arXiv ID: {context.arxiv_id}
+arXiv ID: {context.record_id}
 
 Title:
 {context.title}

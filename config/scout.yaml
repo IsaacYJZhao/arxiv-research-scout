@@ -20,6 +20,54 @@ topic:
     - "cs.LG"
 
 
+# --------------------------------------------------
+# Retrieval sources
+#
+# Sources are queried in the order listed here and
+# their results concatenated. Deduplication keeps the
+# first occurrence, so arXiv comes first: a preprint
+# usually has a downloadable PDF, while the journal
+# version of the same work often does not, and a full
+# text produces a far stronger analysis than an
+# abstract.
+#
+# Each source keeps its own query, because their query
+# languages differ and translating between them loses
+# precision.
+# --------------------------------------------------
+
+sources:
+  arxiv:
+    enabled: true
+    # Query, categories and max_candidates for arXiv
+    # live in topic: and retrieval: below.
+
+  europepmc:
+    enabled: true
+
+    # Europe PMC covers the medical imaging journals
+    # where this field actually publishes, which arXiv
+    # does not index at all.
+    #
+    # Its query language is not arXiv's: fields are
+    # named (TITLE_ABS, AUTH, JOURNAL), and the
+    # publication window is added automatically from
+    # schedule.lookback_days.
+    max_candidates: 50
+
+    query: >
+      (TITLE_ABS:"lung nodule"
+      OR TITLE_ABS:"pulmonary nodule"
+      OR TITLE_ABS:"LUNA16"
+      OR TITLE_ABS:"LNDb"
+      OR TITLE_ABS:"NODE21"
+      OR TITLE_ABS:"LIDC"
+      OR TITLE_ABS:"lung cancer screening")
+      AND
+      (TITLE_ABS:"deep learning"
+      OR TITLE_ABS:"computed tomography")
+
+
 schedule:
   run_every_days: 3
 

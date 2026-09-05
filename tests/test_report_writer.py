@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     PaperAnalysisContext,
     PaperAnalysisResult,
@@ -18,9 +18,9 @@ from arxiv_research_scout.report_writer import (
 )
 
 
-def make_paper() -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.10000v1",
+def make_paper() -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.10000v1",
         title="Example Lung Nodule Paper",
         authors=(
             "Alice Example",
@@ -52,7 +52,7 @@ def make_paper() -> ArxivPaper:
 
 def make_context() -> PaperAnalysisContext:
     return PaperAnalysisContext(
-        arxiv_id="2608.10000v1",
+        record_id="2608.10000v1",
         title="Example Lung Nodule Paper",
         authors=(
             "Alice Example",
@@ -186,7 +186,8 @@ def test_pdf_error_is_included_in_report() -> None:
     )
 
     assert (
-        "Unavailable / fallback used"
+        "Download or parsing failed; "
+        "abstract used instead"
         in markdown
     )
 
@@ -203,7 +204,7 @@ def test_write_report_creates_markdown_file(
     assert report_path.exists()
 
     assert report_path.name == (
-        "2608.10000v1.md"
+        "arxiv_2608.10000.md"
     )
 
     content = report_path.read_text(
@@ -217,5 +218,5 @@ def test_write_report_creates_markdown_file(
 
     assert not (
         tmp_path
-        / "2608.10000v1.md.tmp"
+        / "arxiv_2608.10000.md.tmp"
     ).exists()

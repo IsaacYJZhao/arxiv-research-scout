@@ -26,7 +26,7 @@ def make_context(
         pdf_text_available: bool = True,
 ) -> PaperAnalysisContext:
     return PaperAnalysisContext(
-        arxiv_id="2608.10000v1",
+        record_id="2608.10000v1",
         title="Example Lung Nodule Paper",
         authors=("Alice Example",),
         abstract="Official abstract.",

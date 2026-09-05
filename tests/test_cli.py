@@ -170,7 +170,7 @@ def test_cli_parser_accepts_analyze_paper() -> None:
         "analyze-paper"
     )
 
-    assert args.arxiv_id == (
+    assert args.record_id == (
         "2608.16855v1"
     )
 

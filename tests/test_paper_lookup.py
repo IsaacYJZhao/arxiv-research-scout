@@ -1,7 +1,7 @@
 import pytest
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
 )
 from arxiv_research_scout.paper_lookup import (
     find_arxiv_paper,
@@ -9,10 +9,10 @@ from arxiv_research_scout.paper_lookup import (
 
 
 def make_paper(
-    arxiv_id: str,
-) -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id=arxiv_id,
+    record_id: str,
+) -> PaperRecord:
+    return PaperRecord(
+        record_id=record_id,
         title="Example Paper",
         authors=("Alice Example",),
         abstract="Abstract.",
@@ -21,11 +21,11 @@ def make_paper(
         categories=("cs.CV",),
         abs_url=(
             f"https://arxiv.org/abs/"
-            f"{arxiv_id}"
+            f"{record_id}"
         ),
         pdf_url=(
             f"https://arxiv.org/pdf/"
-            f"{arxiv_id}"
+            f"{record_id}"
         ),
     )
 
@@ -53,7 +53,7 @@ def test_find_exact_arxiv_paper() -> None:
         search_function=fake_search,
     )
 
-    assert paper.arxiv_id == (
+    assert paper.record_id == (
         "2608.16855v2"
     )
 

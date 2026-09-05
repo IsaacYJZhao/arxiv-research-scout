@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     RelevanceAssessment,
 )
 
@@ -33,7 +33,7 @@ def contains_term(
 
 
 def score_term_group(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     terms: list[str],
     *,
     title_points: int,
@@ -72,7 +72,7 @@ def score_term_group(
 
 
 def assess_relevance(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     relevance_config: dict[str, Any],
 ) -> RelevanceAssessment:
     """
@@ -191,11 +191,11 @@ def assess_relevance(
 
 
 def rank_relevant_papers(
-    papers: list[ArxivPaper],
+    papers: list[PaperRecord],
     relevance_config: dict[str, Any],
 ) -> list[
     tuple[
-        ArxivPaper,
+        PaperRecord,
         RelevanceAssessment,
     ]
 ]:

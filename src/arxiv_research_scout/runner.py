@@ -16,7 +16,7 @@ from arxiv_research_scout.config import (
     load_config,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
 )
 from arxiv_research_scout.paper_filters import (
     deduplicate_papers,
@@ -28,6 +28,9 @@ from arxiv_research_scout.paths import (
 from arxiv_research_scout.relevance import (
     rank_relevant_papers,
 )
+from arxiv_research_scout.sources.europepmc import (
+    search_europepmc,
+)
 from arxiv_research_scout.state_manager import (
     filter_unprocessed_papers,
     is_run_due,
@@ -37,12 +40,12 @@ from arxiv_research_scout.state_manager import (
 
 SearchFunction = Callable[
     [str, int],
-    list[ArxivPaper],
+    list[PaperRecord],
 ]
 
 
 SelectedPaper = tuple[
-    ArxivPaper,
+    PaperRecord,
     int,
     str,
 ]
@@ -54,10 +57,19 @@ SelectedPaper = tuple[
 )
 class ScanResult:
     """
-    Result of one arXiv retrieval and relevance scan.
+    Result of one retrieval and relevance scan.
 
     This object contains no LLM analysis and does
     not modify persistent state.
+
+    source_counts records how many candidates each
+    source contributed, before deduplication. It is
+    what tells you whether a source is silently
+    returning nothing.
+
+    source_errors records sources that failed. A failing
+    source is reported rather than raised, so one
+    unavailable service cannot cost a whole run.
     """
 
     due: bool
@@ -72,6 +84,16 @@ class ScanResult:
         SelectedPaper,
         ...,
     ]
+
+    source_counts: tuple[
+        tuple[str, int],
+        ...,
+    ] = ()
+
+    source_errors: tuple[
+        tuple[str, str],
+        ...,
+    ] = ()
 
 
 def empty_scan_result(
@@ -96,6 +118,158 @@ def empty_scan_result(
     )
 
 
+SourceSearchFunction = Callable[
+    ...,
+    list[PaperRecord],
+]
+
+
+def collect_candidates(
+    config: dict,
+    *,
+    lookback_days: int,
+    now: datetime | None,
+    arxiv_search: SearchFunction,
+    europepmc_search: SourceSearchFunction,
+) -> tuple[
+    list[PaperRecord],
+    list[tuple[str, int]],
+    list[tuple[str, str]],
+]:
+    """
+    Query every enabled retrieval source.
+
+    Sources are queried in a fixed order and their
+    results concatenated, because deduplication keeps
+    the first occurrence of a paper: arXiv first, so
+    that a preprint with a downloadable PDF wins over
+    the paywalled journal record of the same work.
+
+    A source that fails is recorded and skipped rather
+    than raised. Losing one source degrades a run;
+    aborting it loses the papers every other source
+    found.
+    """
+
+    sources_config = config.get(
+        "sources",
+        {},
+    )
+
+    candidates: list[PaperRecord] = []
+    counts: list[tuple[str, int]] = []
+    errors: list[tuple[str, str]] = []
+
+    # --------------------------------------------------
+    # arXiv
+    # --------------------------------------------------
+
+    arxiv_config = sources_config.get(
+        "arxiv",
+        {},
+    )
+
+    if arxiv_config.get("enabled", True):
+        topic_config = config["topic"]
+
+        retrieval_config = config["retrieval"]
+
+        query = build_search_query(
+            str(
+                topic_config["arxiv_query"]
+            ).strip(),
+            tuple(
+                topic_config.get(
+                    "categories",
+                    (),
+                )
+            ),
+        )
+
+        try:
+            papers = arxiv_search(
+                query,
+                int(
+                    retrieval_config[
+                        "max_candidates"
+                    ]
+                ),
+            )
+
+        except Exception as error:
+            errors.append(
+                (
+                    "arxiv",
+                    f"{type(error).__name__}: {error}",
+                )
+            )
+
+        else:
+            candidates.extend(papers)
+            counts.append(
+                ("arxiv", len(papers))
+            )
+
+    # --------------------------------------------------
+    # Europe PMC
+    #
+    # Disabled unless configured, so an existing
+    # configuration keeps behaving exactly as before.
+    # --------------------------------------------------
+
+    europepmc_config = sources_config.get(
+        "europepmc",
+        {},
+    )
+
+    if europepmc_config.get("enabled", False):
+        query = str(
+            europepmc_config.get("query", "")
+        ).strip()
+
+        if not query:
+            errors.append(
+                (
+                    "europepmc",
+                    "Enabled but no query configured.",
+                )
+            )
+
+        else:
+            try:
+                papers = europepmc_search(
+                    query,
+                    int(
+                        europepmc_config.get(
+                            "max_candidates",
+                            50,
+                        )
+                    ),
+                    lookback_days=lookback_days,
+                    now=now,
+                )
+
+            except Exception as error:
+                errors.append(
+                    (
+                        "europepmc",
+                        f"{type(error).__name__}: "
+                        f"{error}",
+                    )
+                )
+
+            else:
+                candidates.extend(papers)
+                counts.append(
+                    (
+                        "europepmc",
+                        len(papers),
+                    )
+                )
+
+    return candidates, counts, errors
+
+
 def run_scan(
     config: dict,
     state: dict,
@@ -104,6 +278,9 @@ def run_scan(
     now: datetime | None = None,
     search_function: SearchFunction = (
         search_arxiv
+    ),
+    europepmc_function: SourceSearchFunction = (
+        search_europepmc
     ),
 ) -> ScanResult:
     """
@@ -151,10 +328,6 @@ def run_scan(
             due=False
         )
 
-    topic_config = config[
-        "topic"
-    ]
-
     retrieval_config = config[
         "retrieval"
     ]
@@ -163,39 +336,22 @@ def run_scan(
         "relevance"
     ]
 
-    base_query = str(
-        topic_config[
-            "arxiv_query"
-        ]
-    ).strip()
-
-    categories = tuple(
-        topic_config.get(
-            "categories",
-            (),
-        )
-    )
-
-    query = build_search_query(
-        base_query,
-        categories,
-    )
-
-    max_candidates = int(
-        retrieval_config[
-            "max_candidates"
-        ]
-    )
-
-    candidates = search_function(
-        query,
-        max_candidates,
-    )
-
     lookback_days = int(
         schedule_config[
             "lookback_days"
         ]
+    )
+
+    (
+        candidates,
+        source_counts,
+        source_errors,
+    ) = collect_candidates(
+        config,
+        lookback_days=lookback_days,
+        now=now,
+        arxiv_search=search_function,
+        europepmc_search=europepmc_function,
     )
 
     recent_papers = (
@@ -232,8 +388,22 @@ def run_scan(
         ]
     )
 
+    # Relevance decides what is worth reading; among
+    # equally relevant papers, prefer the ones whose
+    # full text can actually be downloaded, because an
+    # abstract-only analysis is much weaker. Python's
+    # sort is stable, so relevance order survives.
+    prioritized = sorted(
+        ranked_papers,
+        key=lambda item: (
+            item[1].score,
+            item[0].full_text_available,
+        ),
+        reverse=True,
+    )
+
     selected_ranked = (
-        ranked_papers[
+        prioritized[
             :max_papers
         ]
     )
@@ -274,6 +444,12 @@ def run_scan(
         selected_papers=tuple(
             selected_papers
         ),
+        source_counts=tuple(
+            source_counts
+        ),
+        source_errors=tuple(
+            source_errors
+        ),
     )
 
 
@@ -309,6 +485,25 @@ def print_scan_result(
             "Run is not due yet."
         )
         return
+
+    for source_name, count in (
+        result.source_counts
+    ):
+        print(
+            f"  from {source_name:<12}: "
+            f"{count}"
+        )
+
+    for source_name, message in (
+        result.source_errors
+    ):
+        print(
+            f"  {source_name} FAILED  : "
+            f"{message}"
+        )
+
+    if result.source_counts or result.source_errors:
+        print()
 
     print(
         f"Candidates retrieved : "
@@ -371,13 +566,28 @@ def print_scan_result(
         )
 
         print(
-            f"   arXiv ID  : "
-            f"{paper.arxiv_id}"
+            f"   Paper ID  : "
+            f"{paper.record_id}"
         )
 
         print(
             f"   Relevance : "
             f"{score} ({level})"
+        )
+
+        print(
+            f"   Source    : "
+            f"{paper.source}"
+            + (
+                f" | {paper.venue}"
+                if paper.venue
+                else ""
+            )
+        )
+
+        print(
+            f"   Full text : "
+            f"{'yes' if paper.full_text_available else 'abstract only'}"
         )
 
         print(

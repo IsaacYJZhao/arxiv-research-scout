@@ -10,7 +10,7 @@ from arxiv_research_scout.llm_provider import (
     resolve_provider_settings,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     ManualAnalysisResult,
     PaperProcessingResult,
@@ -28,7 +28,7 @@ from arxiv_research_scout.report_writer import (
 
 PaperLookupFunction = Callable[
     ...,
-    ArxivPaper,
+    PaperRecord,
 ]
 
 ProcessorFunction = Callable[
@@ -53,7 +53,7 @@ ReportWriterFunction = Callable[
 
 
 def analyze_single_paper(
-    arxiv_id: str,
+    record_id: str,
     *,
     config: dict,
     reports_root: Path,
@@ -93,7 +93,7 @@ def analyze_single_paper(
     )
 
     paper = paper_lookup(
-        arxiv_id
+        record_id
     )
 
     api_key = api_key_loader(

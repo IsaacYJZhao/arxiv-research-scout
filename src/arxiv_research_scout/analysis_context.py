@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     PaperAnalysisContext,
     PaperSections,
 )
 
 
 def choose_abstract(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     sections: PaperSections,
 ) -> str:
     """
     Choose the best available abstract.
 
-    arXiv metadata is preferred because it is
+    Source metadata is preferred because it is
     usually cleaner and more reliable than text
     extracted from a PDF.
     """
@@ -28,7 +28,7 @@ def choose_abstract(
 
 
 def build_analysis_context(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     sections: PaperSections,
 ) -> PaperAnalysisContext:
     """
@@ -53,7 +53,7 @@ def build_analysis_context(
     )
 
     return PaperAnalysisContext(
-        arxiv_id=paper.arxiv_id,
+        record_id=paper.record_id,
         title=paper.title,
         authors=paper.authors,
         abstract=abstract,
@@ -64,4 +64,7 @@ def build_analysis_context(
         discussion=sections.discussion,
         conclusion=sections.conclusion,
         pdf_text_available=pdf_text_available,
+        source=paper.source,
+        venue=paper.venue,
+        doi=paper.doi,
     )

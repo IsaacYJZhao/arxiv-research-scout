@@ -7,6 +7,9 @@ from arxiv_research_scout.models import (
     LLMProviderSettings,
     PaperProcessingResult,
 )
+from arxiv_research_scout.paper_filters import (
+    record_key,
+)
 from arxiv_research_scout.paths import (
     resolve_project_path,
 )
@@ -18,20 +21,26 @@ UNAVAILABLE_TEXT = (
 
 
 def safe_report_filename(
-    arxiv_id: str,
+    record_id: str,
 ) -> str:
     """
-    Convert an arXiv ID into a safe Markdown filename.
+    Convert a record key into a safe Markdown filename.
+
+    The key carries the source, so reports from
+    different databases cannot collide, and the colon
+    that separates them is not a legal filename
+    character on Windows.
 
     Examples:
-        2608.12345v1 -> 2608.12345v1.md
-        cs/0601001v2 -> cs_0601001v2.md
+        arxiv:2608.12345     -> arxiv_2608.12345.md
+        europepmc:42675277   -> europepmc_42675277.md
+        doi:10.1007/s10278-1 -> doi_10.1007_s10278-1.md
     """
 
     cleaned = re.sub(
         r"[^A-Za-z0-9._-]+",
         "_",
-        arxiv_id.strip(),
+        record_id.strip(),
     )
 
     cleaned = cleaned.strip(
@@ -109,9 +118,17 @@ def build_report_markdown(
 
     if result.pdf_error is None:
         pdf_status = "Available"
+
+    elif paper.full_text_available:
+        pdf_status = (
+            "Download or parsing failed; "
+            "abstract used instead"
+        )
+
     else:
         pdf_status = (
-            "Unavailable / fallback used"
+            "No full text available; "
+            "abstract only"
         )
 
     lines = [
@@ -119,13 +136,25 @@ def build_report_markdown(
         "",
         "## Paper Information",
         "",
-        f"- **arXiv ID:** {paper.arxiv_id}",
+        f"- **Source:** {paper.source}",
+        f"- **Paper ID:** {paper.record_id}",
+        (
+            f"- **DOI:** "
+            f"{markdown_value(paper.doi)}"
+        ),
+        (
+            f"- **Venue:** "
+            f"{markdown_value(paper.venue)}"
+        ),
         f"- **Authors:** {authors}",
         f"- **Published:** {paper.published}",
         f"- **Updated:** {paper.updated}",
         f"- **Categories:** {categories}",
-        f"- **Abstract URL:** {paper.abs_url}",
-        f"- **PDF URL:** {paper.pdf_url}",
+        f"- **Landing URL:** {paper.abs_url}",
+        (
+            f"- **PDF URL:** "
+            f"{markdown_value(paper.pdf_url)}"
+        ),
         "",
         "## Analysis Information",
         "",
@@ -237,7 +266,7 @@ def write_report(
     )
 
     filename = safe_report_filename(
-        result.paper.arxiv_id
+        record_key(result.paper)
     )
 
     report_path = (

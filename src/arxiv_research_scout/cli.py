@@ -195,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     analyze_parser.add_argument(
-        "arxiv_id",
+        "record_id",
         help=(
             "arXiv paper ID, for example "
             "2608.16855v1."
@@ -369,7 +369,7 @@ def run_workflow_command(
 
 def run_analyze_paper_command(
     *,
-    arxiv_id: str,
+    record_id: str,
     provider_override: str | None,
     model_override: str | None,
 ) -> int:
@@ -388,7 +388,7 @@ def run_analyze_paper_command(
     )
 
     result = analyze_single_paper(
-        arxiv_id,
+        record_id,
         config=config,
         reports_root=reports_root,
         provider_override=(
@@ -410,7 +410,7 @@ def run_analyze_paper_command(
 
     print(
         f"arXiv ID       : "
-        f"{processing.paper.arxiv_id}"
+        f"{processing.paper.record_id}"
     )
 
     print(
@@ -560,7 +560,7 @@ def main(
 
     if args.command == "analyze-paper":
         return run_analyze_paper_command(
-            arxiv_id=args.arxiv_id,
+            record_id=args.record_id,
             provider_override=(
                 args.provider
             ),

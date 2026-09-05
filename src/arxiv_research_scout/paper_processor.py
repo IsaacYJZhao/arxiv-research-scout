@@ -10,7 +10,7 @@ from arxiv_research_scout.analyzer import (
     analyze_with_client,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     PaperAnalysisResult,
     PaperProcessingResult,
@@ -37,8 +37,58 @@ AnalyzerFunction = Callable[
 ]
 
 
+def build_abstract_only_result(
+    paper: PaperRecord,
+    *,
+    config: dict,
+    client: Any,
+    settings: LLMProviderSettings,
+    analyzer: AnalyzerFunction,
+    reason: str,
+) -> PaperProcessingResult:
+    """
+    Analyze a paper for which no full text exists.
+
+    The analyzer still runs, so the paper appears in the
+    digest with structured fields, but evidence_level
+    will report abstract_only and the report records why.
+    """
+
+    context = build_analysis_context(
+        paper,
+        PaperSections(),
+    )
+
+    if not context.abstract.strip():
+        raise ValueError(
+            "No analyzable paper evidence "
+            "is available."
+        )
+
+    analysis = analyzer(
+        context,
+        client=client,
+        settings=settings,
+        output_language=(
+            config["output"]["language"]
+        ),
+        max_context_chars=(
+            config["llm"][
+                "max_context_chars"
+            ]
+        ),
+    )
+
+    return PaperProcessingResult(
+        paper=paper,
+        context=context,
+        analysis=analysis,
+        pdf_error=reason,
+    )
+
+
 def process_paper(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     *,
     config: dict,
     client: Any,
@@ -71,6 +121,24 @@ def process_paper(
     llm_config = config["llm"]
 
     pdf_error: str | None = None
+
+    if not paper.pdf_url:
+        # Closed-access journal articles are indexed
+        # without a downloadable PDF. Their record is
+        # still worth analyzing from the abstract, but
+        # attempting a download would only produce a
+        # misleading network error.
+        return build_abstract_only_result(
+            paper,
+            config=config,
+            client=client,
+            settings=settings,
+            analyzer=analyzer,
+            reason=(
+                "No downloadable full text is "
+                "available for this record."
+            ),
+        )
 
     try:
         pdf_text = pdf_fetcher(

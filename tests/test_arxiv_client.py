@@ -100,7 +100,7 @@ def test_parse_feed() -> None:
 
     paper = papers[0]
 
-    assert paper.arxiv_id == "2608.12345v1"
+    assert paper.record_id == "2608.12345v1"
 
     assert paper.title == (
         "A Lung Nodule Detection Method"

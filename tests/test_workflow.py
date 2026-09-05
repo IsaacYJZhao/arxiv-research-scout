@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     BatchProcessingResult,
     PaperProcessingFailure,
 )
@@ -44,9 +44,9 @@ def make_state() -> dict:
     }
 
 
-def make_paper() -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.10000v1",
+def make_paper() -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.10000v1",
         title="Example Paper",
         authors=("Alice Example",),
         abstract="Abstract.",
@@ -506,8 +506,8 @@ def test_partial_failure_writes_digest_but_does_not_mark_run(
 
     failure = (
         PaperProcessingFailure(
-            arxiv_id=(
-                paper.arxiv_id
+            record_id=(
+                paper.record_id
             ),
             title=paper.title,
             error=(

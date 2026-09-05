@@ -4,7 +4,7 @@ from arxiv_research_scout.batch_processor import (
     process_paper_batch,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     PaperAnalysisContext,
     PaperAnalysisResult,
@@ -14,11 +14,11 @@ from arxiv_research_scout.models import (
 
 
 def make_paper(
-    arxiv_id: str,
-) -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id=arxiv_id,
-        title=f"Paper {arxiv_id}",
+    record_id: str,
+) -> PaperRecord:
+    return PaperRecord(
+        record_id=record_id,
+        title=f"Paper {record_id}",
         authors=("Alice Example",),
         abstract="Abstract.",
         published="2026-08-28T10:00:00Z",
@@ -26,11 +26,11 @@ def make_paper(
         categories=("cs.CV",),
         abs_url=(
             f"https://arxiv.org/abs/"
-            f"{arxiv_id}"
+            f"{record_id}"
         ),
         pdf_url=(
             f"https://arxiv.org/pdf/"
-            f"{arxiv_id}"
+            f"{record_id}"
         ),
     )
 
@@ -48,11 +48,11 @@ def make_settings() -> LLMProviderSettings:
 
 
 def make_commit(
-    paper: ArxivPaper,
+    paper: PaperRecord,
     tmp_path: Path,
 ) -> PaperCommitResult:
     context = PaperAnalysisContext(
-        arxiv_id=paper.arxiv_id,
+        record_id=paper.record_id,
         title=paper.title,
         authors=paper.authors,
         abstract=paper.abstract,
@@ -88,7 +88,7 @@ def make_commit(
         processing=processing,
         report_path=(
             tmp_path
-            / f"{paper.arxiv_id}.md"
+            / f"{paper.record_id}.md"
         ),
     )
 
@@ -158,11 +158,11 @@ def test_failure_does_not_stop_later_papers(
         **kwargs,
     ):
         attempted.append(
-            paper.arxiv_id
+            paper.record_id
         )
 
         if (
-            paper.arxiv_id
+            paper.record_id
             == "2608.10002v1"
         ):
             raise RuntimeError(
@@ -238,7 +238,7 @@ def test_failure_information_is_recorded(
 
     failure = result.failures[0]
 
-    assert failure.arxiv_id == (
+    assert failure.record_id == (
         "2608.10001v1"
     )
 

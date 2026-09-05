@@ -4,7 +4,7 @@ from arxiv_research_scout.manual_analysis import (
     analyze_single_paper,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     PaperAnalysisContext,
     PaperAnalysisResult,
     PaperProcessingResult,
@@ -30,9 +30,9 @@ def make_config() -> dict:
     }
 
 
-def make_paper() -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.16855v1",
+def make_paper() -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.16855v1",
         title="Example Paper",
         authors=("Alice Example",),
         abstract="Abstract.",
@@ -54,7 +54,7 @@ def make_processing() -> PaperProcessingResult:
     paper = make_paper()
 
     context = PaperAnalysisContext(
-        arxiv_id=paper.arxiv_id,
+        record_id=paper.record_id,
         title=paper.title,
         authors=paper.authors,
         abstract=paper.abstract,
@@ -93,7 +93,7 @@ def test_manual_report_uses_provider_directory(
     captured = {}
 
     def fake_lookup(
-        arxiv_id: str,
+        record_id: str,
     ):
         return make_paper()
 
@@ -166,7 +166,7 @@ def test_manual_model_override_is_used(
     captured = {}
 
     def fake_lookup(
-        arxiv_id: str,
+        record_id: str,
     ):
         return make_paper()
 
@@ -236,7 +236,7 @@ def test_lookup_happens_before_api_key_loading(
     key_called = False
 
     def failing_lookup(
-        arxiv_id: str,
+        record_id: str,
     ):
         raise LookupError(
             "not found"

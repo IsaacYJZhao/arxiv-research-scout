@@ -6,7 +6,7 @@ from arxiv_research_scout.arxiv_client import (
     search_arxiv,
 )
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
 )
 from arxiv_research_scout.paper_filters import (
     normalize_arxiv_id,
@@ -15,15 +15,15 @@ from arxiv_research_scout.paper_filters import (
 
 SearchFunction = Callable[
     [str, int],
-    list[ArxivPaper],
+    list[PaperRecord],
 ]
 
 
 def find_arxiv_paper(
-    arxiv_id: str,
+    record_id: str,
     *,
     search_function: SearchFunction = search_arxiv,
-) -> ArxivPaper:
+) -> PaperRecord:
     """
     Retrieve one exact arXiv paper by ID.
 
@@ -32,7 +32,7 @@ def find_arxiv_paper(
     same paper.
     """
 
-    requested_id = arxiv_id.strip()
+    requested_id = record_id.strip()
 
     if not requested_id:
         raise ValueError(
@@ -57,7 +57,7 @@ def find_arxiv_paper(
     for paper in candidates:
         if (
             normalize_arxiv_id(
-                paper.arxiv_id
+                paper.record_id
             )
             == normalized_requested
         ):

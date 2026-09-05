@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     BatchProcessingResult,
     LLMProviderSettings,
     PaperCommitResult,
@@ -26,7 +26,7 @@ TransactionFunction = Callable[
 
 
 def process_paper_batch(
-    papers: Sequence[ArxivPaper],
+    papers: Sequence[PaperRecord],
     *,
     config: dict,
     state: dict[str, Any],
@@ -104,7 +104,7 @@ def process_paper_batch(
         except Exception as error:
             failures.append(
                 PaperProcessingFailure(
-                    arxiv_id=paper.arxiv_id,
+                    record_id=paper.record_id,
                     title=paper.title,
                     error=(
                         f"{type(error).__name__}: "

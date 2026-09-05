@@ -5,12 +5,27 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
-class ArxivPaper:
+class PaperRecord:
     """
-    Standard representation of one paper returned by arXiv.
+    Source-independent representation of one paper.
+
+    Every retrieval source normalizes into this shape,
+    so the rest of the pipeline never needs to know
+    which database a paper came from.
+
+    record_id is the identifier native to `source`
+    (an arXiv ID, a Europe PMC ID, ...). It is unique
+    only within that source, so cross-source identity
+    goes through paper_filters.record_key() instead.
+
+    full_text_available says whether a PDF can actually
+    be downloaded. Closed-access journal articles are
+    still worth knowing about, but they can only be
+    analyzed from their abstract, so ranking prefers
+    papers where the full text is reachable.
     """
 
-    arxiv_id: str
+    record_id: str
     title: str
     authors: tuple[str, ...]
     abstract: str
@@ -19,6 +34,15 @@ class ArxivPaper:
     categories: tuple[str, ...]
     abs_url: str
     pdf_url: str
+
+    source: str = "arxiv"
+    doi: str = ""
+    venue: str = ""
+    full_text_available: bool = True
+
+
+# Retained so that older imports keep working.
+ArxivPaper = PaperRecord
 
 @dataclass(frozen=True, slots=True)
 class RelevanceAssessment:
@@ -54,35 +78,11 @@ class PaperAnalysisContext:
     """
     Structured evidence prepared for LLM analysis.
 
-    The abstract comes primarily from arXiv metadata,
-    while detailed sections come from the PDF.
-    """
-
-    arxiv_id: str
-    title: str
-    authors: tuple[str, ...]
-
-    abstract: str
-
-    introduction: str
-    methodology: str
-    experiments: str
-    results: str
-    discussion: str
-    conclusion: str
-
-    pdf_text_available: bool
-
-@dataclass(frozen=True, slots=True)
-class PaperAnalysisContext:
-    """
-    Structured evidence prepared for LLM analysis.
-
     The abstract primarily comes from arXiv metadata.
     Detailed evidence comes from parsed PDF sections.
     """
 
-    arxiv_id: str
+    record_id: str
     title: str
     authors: tuple[str, ...]
 
@@ -96,6 +96,10 @@ class PaperAnalysisContext:
     conclusion: str
 
     pdf_text_available: bool
+
+    source: str = "arxiv"
+    venue: str = ""
+    doi: str = ""
 
 @dataclass(frozen=True, slots=True)
 class PaperAnalysisResult:
@@ -142,7 +146,7 @@ class PaperProcessingResult:
     its final report has been written successfully.
     """
 
-    paper: ArxivPaper
+    paper: PaperRecord
     context: PaperAnalysisContext
     analysis: PaperAnalysisResult
     pdf_error: str | None
@@ -168,7 +172,7 @@ class PaperProcessingFailure:
     batch processing.
     """
 
-    arxiv_id: str
+    record_id: str
     title: str
     error: str
 

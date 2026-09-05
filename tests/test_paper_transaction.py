@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     PaperAnalysisContext,
     PaperAnalysisResult,
@@ -14,9 +14,9 @@ from arxiv_research_scout.paper_transaction import (
 )
 
 
-def make_paper() -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.10000v1",
+def make_paper() -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.10000v1",
         title="Example Paper",
         authors=("Alice Example",),
         abstract="Official abstract.",
@@ -36,7 +36,7 @@ def make_paper() -> ArxivPaper:
 
 def make_context() -> PaperAnalysisContext:
     return PaperAnalysisContext(
-        arxiv_id="2608.10000v1",
+        record_id="2608.10000v1",
         title="Example Paper",
         authors=("Alice Example",),
         abstract="Official abstract.",
@@ -148,7 +148,7 @@ def test_successful_transaction_updates_state(
     )
 
     assert (
-        "2608.10000"
+        "arxiv:2608.10000"
         in state["processed_ids"]
     )
 
@@ -313,7 +313,7 @@ def test_existing_processed_ids_are_preserved(
     state = make_state()
 
     state["processed_ids"] = [
-        "2501.00001",
+        "arxiv:2501.00001",
     ]
 
     def fake_processor(
@@ -356,11 +356,11 @@ def test_existing_processed_ids_are_preserved(
         ),
     )
 
-    assert "2501.00001" in (
+    assert "arxiv:2501.00001" in (
         state["processed_ids"]
     )
 
-    assert "2608.10000" in (
+    assert "arxiv:2608.10000" in (
         state["processed_ids"]
     )
 

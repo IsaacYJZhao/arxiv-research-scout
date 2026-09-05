@@ -1,7 +1,7 @@
 import pytest
 
 from arxiv_research_scout.models import (
-    ArxivPaper,
+    PaperRecord,
     LLMProviderSettings,
     PaperAnalysisResult,
     PaperSections,
@@ -14,9 +14,9 @@ from arxiv_research_scout.paper_processor import (
 def make_paper(
     *,
     abstract: str = "Official arXiv abstract.",
-) -> ArxivPaper:
-    return ArxivPaper(
-        arxiv_id="2608.10000v1",
+) -> PaperRecord:
+    return PaperRecord(
+        record_id="2608.10000v1",
         title="Example Paper",
         authors=("Alice Example",),
         abstract=abstract,
