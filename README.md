@@ -22,6 +22,7 @@ The project is designed for both local execution and unattended GitHub Actions w
 * Generate one multi-paper Markdown digest for each completed research run.
 * Persist processed arXiv IDs and successful-run timestamps.
 * Run automatically through GitHub Actions.
+* Sync GitHub Actions results back to the local machine and raise a desktop notification (`notify_bridge.py`).
 * Avoid unnecessary LLM calls when no paper requires analysis.
 
 ## Architecture
@@ -104,15 +105,15 @@ cd arxiv-research-scout
 
 ```powershell
 py -3.11 -m venv .venv
-.\\.venv\\Scripts\\python.exe -m pip install -e ".\[dev]"
-.\\.venv\\Scripts\\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
 ```
 
 ### Linux / macOS
 
 ```bash
 python3.11 -m venv .venv
-./.venv/bin/python -m pip install -e ".\[dev]"
+./.venv/bin/python -m pip install -e ".[dev]"
 ./.venv/bin/python -m pytest
 ```
 
@@ -123,29 +124,29 @@ API keys are read only from environment variables. Do not store real credentials
 Supported variables:
 
 ```text
-DEEPSEEK\_API\_KEY
-OPENAI\_API\_KEY
+DEEPSEEK_API_KEY
+OPENAI_API_KEY
 ```
 
 The repository includes `.env.example` only as documentation:
 
 ```text
-OPENAI\_API\_KEY=your\_openai\_api\_key\_here
-DEEPSEEK\_API\_KEY=your\_deepseek\_api\_key\_here
+OPENAI_API_KEY=your_openai_api_key_here
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ```
 
 ### PowerShell
 
 ```powershell
-$env:DEEPSEEK\_API\_KEY = "<your-key>"
-$env:OPENAI\_API\_KEY = "<your-key>"
+$env:DEEPSEEK_API_KEY = "<your-key>"
+$env:OPENAI_API_KEY = "<your-key>"
 ```
 
 ### Linux / macOS
 
 ```bash
-export DEEPSEEK\_API\_KEY="<your-key>"
-export OPENAI\_API\_KEY="<your-key>"
+export DEEPSEEK_API_KEY="<your-key>"
+export OPENAI_API_KEY="<your-key>"
 ```
 
 Only the key for the provider actually used is required.
@@ -156,13 +157,13 @@ The default provider is configured in `config/scout.yaml`:
 
 ```yaml
 llm:
-  default\_provider: "deepseek"
+  default_provider: "deepseek"
 ```
 
 Inspect the active provider:
 
 ```powershell
-.\\.venv\\Scripts\\arxiv-scout.exe provider
+.\.venv\Scripts\arxiv-scout.exe provider
 ```
 
 Temporarily switch to OpenAI:
@@ -191,7 +192,7 @@ arxiv-scout scan
 arxiv-scout scan --force
 ```
 
-`scan` previews retrieval/relevance results. It does not analyze papers and does not update persistent state.
+`scan` previews retrieval/relevance results. It does not analyze papers, does not consume API credits, and does not update persistent state. Use it after changing `config/scout.yaml` to confirm that the query and the relevance rules select the papers you expect.
 
 ### Run the Complete Pipeline
 
@@ -203,13 +204,13 @@ Pipeline:
 
 ```text
 arXiv scan
-→ filtering
-→ relevance ranking
-→ PDF processing
-→ LLM analysis
-→ paper reports
-→ research digest
-→ state update
+-> filtering
+-> relevance ranking
+-> PDF processing
+-> LLM analysis
+-> paper reports
+-> research digest
+-> state update
 ```
 
 Force a run even when the configured interval has not elapsed:
@@ -252,6 +253,67 @@ reports/manual/<provider>/
 
 `reports/manual/` is ignored by Git because it is intended for local testing and provider comparison.
 
+## Where Results Live
+
+This is the part that most often causes confusion, so it is worth stating explicitly.
+
+**GitHub Actions runs do not write to your local disk.** A scheduled run happens on GitHub's runner and commits its output back to the repository:
+
+```text
+.state/state.json
+reports/<arxiv-id>.md
+reports/digests/<date>.md
+```
+
+Those files exist on GitHub immediately. They appear on your own machine only after the repository is pulled:
+
+```bash
+git pull --rebase origin main
+```
+
+Until you pull, your local `reports/` and `.state/state.json` reflect the last time *you* synced, not the last time the pipeline ran. If a digest is missing locally but visible on GitHub, this is the reason.
+
+`notify_bridge.py` (below) automates that pull, so in normal use you never have to remember it.
+
+## Desktop Notifications (`notify_bridge.py`)
+
+`notify_bridge.py` sits at the repository root and bridges research results into a desktop-pet notification inbox. It reads only public artifacts (`.state/state.json` and `reports/`) and does not import project internals, so it survives most upgrades of this project.
+
+### Sync mode (default, recommended)
+
+```bash
+python notify_bridge.py
+```
+
+1. `git fetch` and check whether the remote has new bot commits.
+2. If not, exit quietly without notifying.
+3. If yes, fast-forward merge — this is what brings the reports and digests onto local disk.
+4. Diff `processed_ids` before and after the merge; the difference is the set of papers analyzed in that run.
+5. Emit one notification pointing at the first new report, falling back to the newest digest.
+
+Retrieval itself runs in GitHub Actions. Your machine can be switched off in the meantime; the first run after boot catches up. Because only one scheduler owns `.state/state.json`, local and remote state cannot diverge.
+
+By default no notification is sent when a cloud run selected no papers. Pass `--notify-empty` if you would rather receive a heartbeat:
+
+```bash
+python notify_bridge.py --notify-empty
+```
+
+If the working tree has uncommitted changes, the fast-forward cannot proceed. Rather than failing silently, the script sends a "sync blocked" notification so an unsynced state is never mistaken for "no new papers".
+
+### Local mode (fallback / offline)
+
+```bash
+python notify_bridge.py --local
+python notify_bridge.py --local --force
+```
+
+Runs the full pipeline locally, exactly as older versions of this script did. It requires a local API key and it writes local `.state/state.json`. Commit and push afterwards, otherwise the next GitHub Actions run will hit a rebase conflict on the state file.
+
+### Windows Task Scheduler
+
+Point the scheduled task at `notify_bridge.py` rather than at `arxiv-scout run`. Sync mode is cheap — a `git fetch` with no new commits costs nothing — so scheduling it daily, or at logon, is reasonable regardless of `run_every_days`.
+
 ## Configuration
 
 Main configuration file:
@@ -265,32 +327,38 @@ Important sections:
 ```yaml
 topic:
   name: "3D CT Lung Nodule Detection"
-  arxiv\_query: >
+  arxiv_query: >
     ...
   categories:
     - "cs.CV"
     - "eess.IV"
+    - "cs.LG"
 
 schedule:
-  run\_every\_days: 3
-  lookback\_days: 5
+  run_every_days: 3
+  lookback_days: 14
 
 retrieval:
-  max\_candidates: 40
-  max\_papers: 8
+  max_candidates: 100
+  max_papers: 8
 
 pdf:
-  max\_download\_mb: 50
-  max\_text\_chars: 70000
-  timeout\_seconds: 90
-  max\_attempts: 3
+  max_download_mb: 50
+  max_text_chars: 70000
+  timeout_seconds: 90
+  max_attempts: 3
 
 llm:
-  default\_provider: "deepseek"
+  default_provider: "deepseek"
+
+relevance:
+  min_score: 4
+  high_score: 8
+  require_core: true
 
 output:
   language: "zh-CN"
-  reports\_dir: "reports"
+  reports_dir: "reports"
 
 state:
   file: ".state/state.json"
@@ -298,13 +366,39 @@ state:
 
 ### Scheduling
 
-`run\_every\_days` controls how often a full research scan is due. GitHub Actions may wake up more frequently, but the Python application checks `.state/state.json` before doing research work.
+`run_every_days` controls how often a full research scan is due. GitHub Actions wakes up more frequently than that; the Python application checks `.state/state.json` before doing any research work, so a daily wake-up does not imply a daily LLM API call.
+
+### Choosing `lookback_days`
+
+`lookback_days` is the publication window applied after retrieval. It must be large enough that a topic actually produces papers inside it.
+
+For a narrow topic this matters more than it looks. The default configuration monitors 3D CT lung nodule detection, which publishes roughly two to three matching preprints per month — a five-day window returns nothing on most runs. `lookback_days` is therefore set well above `run_every_days`; papers already analyzed are filtered out by `processed_ids`, so an overlapping window costs nothing.
+
+`retrieval.max_candidates` must be raised alongside it. The arXiv response is truncated at that value *before* date filtering, so too small a value can silently cut off the window.
 
 ## Relevance Filtering
 
-The project uses configurable rule-based relevance scoring before sending papers to an LLM. The configuration supports core terms, target terms, supporting terms, deprioritized terms, a minimum score, and a high-relevance score.
+Rule-based scoring runs before any PDF download or LLM call, which is what keeps API usage low.
 
-This reduces unnecessary PDF processing and LLM API usage.
+Term groups and their weights:
+
+```text
+core_terms          title +4   abstract +2
+target_terms        title +5   abstract +3
+supporting_terms    title +2   abstract +1
+deprioritize_terms  title -1   abstract  0
+```
+
+Admission uses two independent gates:
+
+* `require_core` — when true, a paper must match at least one core term. This is the topic gate: it decides whether the paper is about the subject at all.
+* `min_score` — removes papers that only mention the subject in passing.
+
+`deprioritize_terms` take part in neither gate. They express a reading preference and only push a paper down the ranking; the total score is clamped at zero so that stacked penalties cannot drive a paper below the threshold.
+
+This separation is deliberate. Treating deprioritized terms as a veto is what makes a scout silently return nothing: in this field almost every recent title contains "segmentation", so a large title penalty combined with a high `min_score` rejects on-topic work — including papers built on LUNA16, LNDb, and LIDC-IDRI.
+
+Note that term matching is word-boundary aware and treats `-` as a boundary, so `LIDC` also matches `LIDC-IDRI`, and `CAD` does not match `cascade`.
 
 ## Evidence-Grounded Analysis
 
@@ -338,9 +432,9 @@ When evidence is unavailable, the analysis should explicitly state that the info
 Typical values:
 
 ```text
-full\_text
-partial\_text
-abstract\_only
+full_text
+partial_text
+abstract_only
 ```
 
 Evidence level is determined by local code rather than by the LLM.
@@ -381,6 +475,8 @@ A digest contains provider/model information, run status, retrieval statistics, 
 
 Digest generation is performed locally from already structured analyses and does not require an additional LLM call.
 
+A digest is written even when no paper was selected. Its retrieval statistics are the fastest way to tell *why* a run was empty — whether the query returned nothing, the date window rejected everything, or the relevance rules did.
+
 ## State Management
 
 Persistent state is stored in:
@@ -393,13 +489,15 @@ Example:
 
 ```json
 {
-  "schema\_version": 1,
-  "last\_successful\_run\_utc": null,
-  "processed\_ids": \[]
+  "schema_version": 1,
+  "last_successful_run_utc": null,
+  "processed_ids": []
 }
 ```
 
 arXiv version suffixes are normalized for processed-paper identity. For example, `2608.12345v1`, `2608.12345v2`, and `2608.12345v3` are treated as versions of the same paper.
+
+This file must have exactly one writer. Running the pipeline both locally and in GitHub Actions makes the two copies diverge, which surfaces later as a rebase conflict on `state.json` or as papers analyzed twice. Pick one scheduler; see the `notify_bridge.py` section above.
 
 ## Transaction Semantics
 
@@ -409,17 +507,17 @@ For one paper:
 
 ```text
 analysis succeeds
-→ report succeeds
-→ processed ID is persisted
+-> report succeeds
+-> processed ID is persisted
 ```
 
 For one complete scheduled run:
 
 ```text
 selected papers processed
-→ digest successfully written
-→ no unresolved paper failures
-→ last\_successful\_run\_utc updated
+-> digest successfully written
+-> no unresolved paper failures
+-> last_successful_run_utc updated
 ```
 
 If one paper fails:
@@ -450,7 +548,7 @@ Workflow file:
 
 The workflow supports:
 
-* manual execution through `workflow\_dispatch`
+* manual execution through `workflow_dispatch`
 * scheduled execution through GitHub Actions cron
 * Python 3.11 setup
 * dependency installation
@@ -463,31 +561,31 @@ The workflow wakes up once per day. The application itself checks:
 
 ```yaml
 schedule:
-  run\_every\_days: 3
+  run_every_days: 3
 ```
 
-before performing a full research scan. A daily GitHub Actions wake-up does not imply a daily LLM API call.
+before performing a full research scan.
 
 ### Required GitHub Secret
 
 For the default DeepSeek provider, configure:
 
 ```text
-DEEPSEEK\_API\_KEY
+DEEPSEEK_API_KEY
 ```
 
 In the GitHub repository:
 
 ```text
 Settings
-→ Secrets and variables
-→ Actions
-→ New repository secret
+-> Secrets and variables
+-> Actions
+-> New repository secret
 ```
 
-If scheduled runs are later configured to use OpenAI, also add `OPENAI\_API\_KEY`.
+If scheduled runs are later configured to use OpenAI, also add `OPENAI_API_KEY`.
 
-## GitHub Actions Output Persistence
+### Output Persistence
 
 When a scheduled run produces changes, GitHub Actions automatically commits:
 
@@ -497,6 +595,12 @@ reports/
 ```
 
 using the GitHub Actions bot account. If no generated files change, no commit is created.
+
+### Operational Notes
+
+* GitHub Actions cron fires late under load, sometimes by hours. Because `last_successful_run_utc` records the completion time, that delay carries into the next interval, so the observed cadence can drift from three days toward four.
+* GitHub disables scheduled workflows in repositories with no activity for 60 days, and commits made by `github-actions[bot]` do not reset that clock. Trigger a `workflow_dispatch` run or push a commit occasionally to keep the schedule alive.
+* The test suite runs before the scout step. A test failure therefore also skips that day's retrieval.
 
 ## Project Structure
 
@@ -514,40 +618,40 @@ arxiv-research-scout/
 │   └── digests/
 ├── skills/
 │   └── arxiv-paper-scout/
-│       └── SKILL.md
+│       ├── SKILL.md
+│       └── references/
 ├── src/
-│   └── arxiv\_research\_scout/
-│       ├── \_\_init\_\_.py
-│       ├── analysis\_context.py
-│       ├── analysis\_schema.py
+│   └── arxiv_research_scout/
+│       ├── __init__.py
+│       ├── analysis_context.py
+│       ├── analysis_schema.py
 │       ├── analyzer.py
-│       ├── arxiv\_client.py
-│       ├── batch\_processor.py
+│       ├── arxiv_client.py
+│       ├── batch_processor.py
 │       ├── cli.py
 │       ├── config.py
-│       ├── digest\_writer.py
-│       ├── llm\_provider.py
-│       ├── manual\_analysis.py
+│       ├── digest_writer.py
+│       ├── llm_provider.py
+│       ├── manual_analysis.py
 │       ├── models.py
-│       ├── paper\_filters.py
-│       ├── paper\_lookup.py
-│       ├── paper\_processor.py
-│       ├── paper\_transaction.py
+│       ├── paper_filters.py
+│       ├── paper_lookup.py
+│       ├── paper_processor.py
+│       ├── paper_transaction.py
 │       ├── paths.py
-│       ├── pdf\_reader.py
+│       ├── pdf_reader.py
 │       ├── relevance.py
-│       ├── report\_writer.py
+│       ├── report_writer.py
 │       ├── runner.py
-
-│       ├── section\_parser.py
-
-│       ├── state\_manager.py
-
-│       └── workflow.py├── tests/
+│       ├── section_parser.py
+│       ├── state_manager.py
+│       └── workflow.py
+├── tests/
 ├── .env.example
 ├── .gitattributes
 ├── .gitignore
 ├── LICENSE
+├── notify_bridge.py
 ├── README.md
 └── pyproject.toml
 ```
@@ -563,9 +667,9 @@ Ignored local artifacts include:
 ```text
 .env
 .venv/
-\_\_pycache\_\_/
-.pytest\_cache/
-\*.egg-info/
+__pycache__/
+.pytest_cache/
+*.egg-info/
 reports/manual/
 ```
 
@@ -583,6 +687,16 @@ The offline test suite covers path portability, configuration, arXiv parsing, re
 
 Network services are mocked in unit tests, so the normal test suite does not consume LLM API credits.
 
+## Troubleshooting
+
+**A digest exists on GitHub but not on my machine.** The repository has not been pulled. Run `git pull --rebase origin main`, or let `notify_bridge.py` do it.
+
+**Every digest reports zero papers.** Read the retrieval statistics in the digest. `Candidates retrieved` at zero means the query matched nothing; a non-zero value collapsing to `Recent papers: 0` means `lookback_days` is narrower than the topic's publication rate; `Relevant papers: 0` with a non-zero `Unprocessed papers` means the relevance rules rejected everything. `arxiv-scout scan --force` reproduces all of this without spending API credits.
+
+**`notify_bridge.py` reports that sync is blocked.** The working tree has uncommitted changes and cannot fast-forward. Commit or stash them, then run the script again.
+
+**A scheduled run turned red on GitHub.** Exit code 1 means at least one paper failed during analysis. The digest for that run was still written and lists the failures; `last_successful_run_utc` was deliberately left unchanged so the failed papers are retried on the next wake-up.
+
 ## Current Example Research Topic
 
 The repository is currently configured to monitor:
@@ -595,9 +709,9 @@ This is only the default example configuration. To monitor another field, modify
 
 ## Development Status
 
-Core research-monitoring functionality is operational, including local execution, dual-provider analysis, structured paper analysis, per-paper reports, multi-paper digests, persistent state, GitHub Actions automation, and scheduled unattended execution.
+Core research-monitoring functionality is operational, including local execution, dual-provider analysis, structured paper analysis, per-paper reports, multi-paper digests, persistent state, GitHub Actions automation, scheduled unattended execution, and desktop notification of cloud results.
 
-The ChatGPT Skill integration under `skills/arxiv-paper-scout/` is the next integration layer.
+The Skill integration under `skills/arxiv-paper-scout/` is the next integration layer.
 
 ## License
 

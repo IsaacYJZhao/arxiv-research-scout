@@ -92,8 +92,17 @@ def assess_relevance(
             abstract +1
 
         deprioritize terms:
-            title -4
-            abstract -1
+            title -1
+            abstract  0
+
+    Deprioritize terms express a reading preference,
+    not an exclusion rule. They lower a paper's rank
+    but must not be able to push an on-topic paper
+    below the admission threshold on their own, so the
+    penalty is small and the total is clamped at zero.
+
+    Exclusion is handled by require_core in
+    rank_relevant_papers().
     """
 
     core_score, core_matches = (
@@ -139,16 +148,19 @@ def assess_relevance(
                 "deprioritize_terms",
                 [],
             ),
-            title_points=-4,
-            abstract_points=-1,
+            title_points=-1,
+            abstract_points=0,
         )
     )
 
-    total_score = (
-        core_score
-        + target_score
-        + support_score
-        + penalty_score
+    total_score = max(
+        0,
+        (
+            core_score
+            + target_score
+            + support_score
+            + penalty_score
+        ),
     )
 
     high_score = relevance_config[
@@ -190,13 +202,33 @@ def rank_relevant_papers(
     """
     Score, filter, and rank papers.
 
-    Papers below min_score are excluded.
+    Admission has two independent gates:
+
+    1. require_core (optional, default False)
+       When enabled, a paper must match at least one
+       core term. This is the topic gate: it decides
+       whether the paper is about lung nodules at all.
+
+    2. min_score
+       Removes papers that only mention the topic in
+       passing.
+
+    Deprioritize terms take part in neither gate. They
+    only affect the ordering of admitted papers.
+
     Higher scores appear first.
     """
 
     min_score = relevance_config[
         "min_score"
     ]
+
+    require_core = bool(
+        relevance_config.get(
+            "require_core",
+            False,
+        )
+    )
 
     assessed = [
         (
@@ -216,6 +248,10 @@ def rank_relevant_papers(
         )
         for paper, assessment in assessed
         if assessment.score >= min_score
+        and (
+            not require_core
+            or assessment.matched_core_terms
+        )
     ]
 
     return sorted(

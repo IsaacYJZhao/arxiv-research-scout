@@ -4,8 +4,11 @@ topic:
   arxiv_query: >
     (all:"lung nodule"
     OR all:"pulmonary nodule"
+    OR all:"lung cancer screening"
+    OR all:"LIDC"
     OR all:"LNDb"
-    OR all:"LUNA16")
+    OR all:"LUNA16"
+    OR all:"NLST")
     AND
     (all:"deep learning"
     OR all:"computed tomography")
@@ -13,15 +16,29 @@ topic:
   categories:
     - "cs.CV"
     - "eess.IV"
+    - "cs.LG"
 
 
 schedule:
   run_every_days: 3
-  lookback_days: 5
+
+  # Static floor for the publication window.
+  #
+  # The observed publication rate for this topic is
+  # roughly 2-3 papers per month, so a 5-day window
+  # returned zero papers on every automated run.
+  #
+  # runner.py additionally widens this window when a
+  # previous scheduled run failed, so that papers are
+  # never skipped permanently.
+  lookback_days: 14
 
 
 retrieval:
-  max_candidates: 40
+  # Must be large enough to cover lookback_days worth
+  # of submissions, because the arXiv response is
+  # truncated at this value before date filtering.
+  max_candidates: 100
   max_papers: 8
 
 pdf:
@@ -44,14 +61,28 @@ llm:
     base_url: "https://api.deepseek.com"
 
 relevance:
-  min_score: 7
-  high_score: 10
+  # Admission is governed by require_core, not by a
+  # high threshold. min_score only removes papers that
+  # mention the topic in passing.
+  min_score: 4
+  high_score: 8
+
+  # A paper must match at least one core term to enter
+  # the candidate set. This replaces the previous
+  # behaviour where deprioritize_terms could veto an
+  # otherwise on-topic paper.
+  require_core: true
 
   core_terms:
     - "lung nodule"
     - "pulmonary nodule"
+    - "lung cancer screening"
+    # "LIDC" also matches "LIDC-IDRI", because
+    # contains_term() treats "-" as a word boundary.
+    - "LIDC"
     - "LUNA16"
     - "LNDb"
+    - "NLST"
 
   target_terms:
     - "detection"
@@ -72,6 +103,8 @@ relevance:
     - "3D"
     - "deep learning"
 
+  # These now only push a paper down the ranking.
+  # They can no longer exclude it.
   deprioritize_terms:
     - "segmentation"
     - "malignancy"
@@ -80,6 +113,7 @@ relevance:
     - "vision-language model"
     - "vision language model"
     - "clinical decision making"
+
 output:
   language: "zh-CN"
   reports_dir: "reports"

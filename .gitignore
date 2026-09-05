@@ -55,3 +55,6 @@ Thumbs.db
 
 # Manual provider comparison reports
 reports/manual/
+# Packaged skill exports (source lives in skills/)
+arxiv-paper-scout.zip
+*.zip

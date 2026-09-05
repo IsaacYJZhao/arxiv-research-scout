@@ -214,3 +214,119 @@ def test_candidate_classification_is_relevant() -> None:
 
     assert result.level == "high"
     assert result.score >= 10
+
+def strict_relevance_config() -> dict:
+    """
+    Current production-style configuration.
+
+    Admission is governed by require_core; deprioritize
+    terms only affect ranking.
+    """
+
+    config = relevance_config()
+
+    config["min_score"] = 4
+    config["high_score"] = 8
+    config["require_core"] = True
+
+    config["core_terms"] = [
+        "lung nodule",
+        "pulmonary nodule",
+        "lung cancer screening",
+        "LIDC",
+        "LUNA16",
+        "LNDb",
+        "NLST",
+    ]
+
+    return config
+
+
+def test_deprioritized_terms_cannot_veto_an_on_topic_paper() -> None:
+    """
+    Regression test.
+
+    Under the previous weights this paper scored 5 and
+    was dropped by min_score 7, even though it is a 3D
+    lung nodule study on LIDC and LNDb.
+    """
+
+    paper = make_paper(
+        title=(
+            "3D Lung Nodule Segmentation "
+            "in Low-Dose CT"
+        ),
+        abstract=(
+            "We evaluate on LIDC and LNDb "
+            "using deep learning."
+        ),
+    )
+
+    config = strict_relevance_config()
+
+    result = assess_relevance(
+        paper,
+        config,
+    )
+
+    assert result.matched_deprioritize_terms
+    assert result.score >= config["min_score"]
+
+    ranked = rank_relevant_papers(
+        [paper],
+        config,
+    )
+
+    assert len(ranked) == 1
+
+
+def test_require_core_excludes_off_topic_paper() -> None:
+    """
+    A high-scoring paper with no core-term match must
+    not enter the candidate set.
+    """
+
+    paper = make_paper(
+        title=(
+            "3D Deep Learning Detection in CT"
+        ),
+        abstract=(
+            "A general-purpose detector for "
+            "computed tomography volumes."
+        ),
+    )
+
+    config = strict_relevance_config()
+
+    result = assess_relevance(
+        paper,
+        config,
+    )
+
+    assert not result.matched_core_terms
+    assert result.score >= config["min_score"]
+
+    assert rank_relevant_papers(
+        [paper],
+        config,
+    ) == []
+
+
+def test_score_is_never_negative() -> None:
+    paper = make_paper(
+        title=(
+            "Segmentation, Malignancy, "
+            "Characterization and Triage"
+        ),
+        abstract=(
+            "A vision language model for "
+            "clinical decision making."
+        ),
+    )
+
+    result = assess_relevance(
+        paper,
+        strict_relevance_config(),
+    )
+
+    assert result.score >= 0
