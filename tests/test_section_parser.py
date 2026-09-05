@@ -213,3 +213,125 @@ References
     assert "Example reference" not in (
         sections.conclusion
     )
+
+def test_compound_heading_is_identified() -> None:
+    """
+    Regression test.
+
+    "3 Method and Experimental Setup" is the heading
+    style that silently dropped a paper's entire method
+    section: the heading was unrecognized, so its body
+    was appended to Related Work, which never reaches
+    the analysis context.
+    """
+
+    assert identify_section(
+        "3 Method and Experimental Setup"
+    ) == "methodology"
+
+    assert identify_section(
+        "4 Experiments and Results"
+    ) == "experiments"
+
+    assert identify_section(
+        "2 Introduction and Related Work"
+    ) == "introduction"
+
+    assert identify_section(
+        "Method, Experiments and Results"
+    ) == "methodology"
+
+
+def test_exact_alias_wins_over_compound_rule() -> None:
+    """
+    "results and discussion" is curated as a discussion
+    heading, so the generic compound rule must not
+    reclassify it as results.
+    """
+
+    assert identify_section(
+        "5 Results and Discussion"
+    ) == "discussion"
+
+    assert identify_section(
+        "III. Materials and Methods"
+    ) == "methodology"
+
+
+def test_compound_rule_requires_every_part_to_be_known() -> None:
+    """
+    Requiring all parts to resolve is what keeps prose,
+    author affiliations and figure legends out.
+    """
+
+    unknown_headings = [
+        "3 Method and Motivation",
+        "Results are shown in Table 2 and Table 3",
+        "Datasets, Metrics and Baselines",
+        "Ann-Conf-3DUnet (Pred)",
+        "Berlin, Germany",
+    ]
+
+    for line in unknown_headings:
+        assert identify_section(line) is None
+
+
+def test_parse_sections_with_merged_method_heading() -> None:
+    """
+    Mirrors the real structure of arXiv 2608.14766v1:
+
+        1 Introduction
+        2 Related Work
+        3 Method and Experimental Setup
+        4 Results
+        5 Conclusion
+
+    Before the compound rule, the method body ended up
+    inside related_work and evidence_level degraded to
+    partial_text.
+    """
+
+    text = """
+1 Introduction
+Presence ambiguity is underexplored.
+
+2 Related Work
+Prior work aggregates entropy maps.
+
+3 Method and Experimental Setup
+We train an ambiguity head on frozen features.
+
+4 Results
+The ambiguity head reaches 0.74 AUROC on LIDC.
+
+5 Conclusion
+Entropy aggregation is not a proxy for ambiguity.
+
+Bibliography
+[1] Example reference.
+"""
+
+    sections = parse_sections(text)
+
+    assert sections.methodology == (
+        "We train an ambiguity head "
+        "on frozen features."
+    )
+
+    assert sections.results == (
+        "The ambiguity head reaches "
+        "0.74 AUROC on LIDC."
+    )
+
+    assert sections.related_work == (
+        "Prior work aggregates entropy maps."
+    )
+
+    assert "ambiguity head" not in (
+        sections.related_work
+    )
+
+    # This is the combination determine_evidence_level()
+    # requires for full_text.
+    assert sections.methodology
+    assert sections.results

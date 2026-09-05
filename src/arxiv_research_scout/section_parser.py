@@ -24,7 +24,9 @@ SECTION_ALIASES = {
         "related work",
         "related works",
         "background",
+        "prior work",
         "literature review",
+        "related literature",
     },
 
     "methodology": {
@@ -37,6 +39,10 @@ SECTION_ALIASES = {
         "proposed methods",
         "proposed approach",
         "approach",
+        "our method",
+        "our approach",
+        "proposed framework",
+        "material and methods",
     },
 
     "experiments": {
@@ -50,6 +56,8 @@ SECTION_ALIASES = {
         "evaluation setup",
         "evaluation protocol",
         "experimental design",
+        "experimental evaluation",
+        "implementation details",
     },
 
     "results": {
@@ -59,11 +67,15 @@ SECTION_ALIASES = {
         "results and analysis",
         "quantitative results",
         "qualitative results",
+        "main results",
+        "findings",
     },
 
     "discussion": {
         "discussion",
         "results and discussion",
+        "limitations",
+        "limitations and future work",
     },
 
     "conclusion": {
@@ -73,6 +85,9 @@ SECTION_ALIASES = {
         "conclusions and future work",
         "conclusion and future works",
         "conclusions and future works",
+        "concluding remarks",
+        "summary and conclusion",
+        "conclusion and outlook",
     },
 }
 
@@ -160,8 +175,108 @@ def normalize_heading(
 
 
 # --------------------------------------------------
+# Compound headings
+#
+# Authors frequently merge two sections under one
+# heading:
+#
+#     3 Method and Experimental Setup
+#     4 Experiments and Results
+#     2 Introduction and Related Work
+#
+# Exact alias matching misses all of these, and a
+# missed heading is worse than a missed section: the
+# whole body of that section is silently appended to
+# the previous one, where build_analysis_context()
+# may never look at it.
+# --------------------------------------------------
+
+COMPOUND_SEPARATORS = re.compile(
+    r"""
+    \s+and\s+
+    |
+    \s*&\s*
+    |
+    \s*,\s*
+    |
+    \s*/\s*
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
+)
+
+
+# --------------------------------------------------
 # Section identification
 # --------------------------------------------------
+
+def lookup_alias(
+    heading: str,
+) -> str | None:
+    """
+    Resolve one already-normalized heading against the
+    alias tables.
+
+    Returns "stop" for terminal sections such as
+    References or Bibliography.
+    """
+
+    if heading in STOP_SECTION_ALIASES:
+        return "stop"
+
+    for section_name, aliases in (
+        SECTION_ALIASES.items()
+    ):
+        if heading in aliases:
+            return section_name
+
+    return None
+
+
+def identify_compound_section(
+    heading: str,
+) -> str | None:
+    """
+    Resolve a merged heading such as
+    "method and experimental setup".
+
+    Every part must independently be a known alias.
+    That requirement is what keeps ordinary prose out:
+    "results are shown in table 2 and table 3" splits
+    into parts that are not aliases, so it is rejected.
+
+    The first part wins, because a merged section is
+    written in the order the authors present it and its
+    body starts with that material.
+    """
+
+    parts = [
+        part.strip()
+        for part in COMPOUND_SEPARATORS.split(
+            heading
+        )
+    ]
+
+    parts = [
+        part
+        for part in parts
+        if part
+    ]
+
+    if len(parts) < 2:
+        return None
+
+    resolved: list[str] = []
+
+    for part in parts:
+        section_name = lookup_alias(part)
+
+        if section_name is None:
+            return None
+
+        resolved.append(section_name)
+
+    return resolved[0]
+
 
 def identify_section(
     line: str,
@@ -182,6 +297,11 @@ def identify_section(
 
     Returns None when the line does not look like a
     known section heading.
+
+    Exact aliases are checked first, so an explicitly
+    listed merged heading such as "results and
+    discussion" keeps its curated mapping instead of
+    falling through to the generic compound rule.
     """
 
     stripped = line.strip()
@@ -199,16 +319,14 @@ def identify_section(
         stripped
     )
 
-    if heading in STOP_SECTION_ALIASES:
-        return "stop"
+    direct = lookup_alias(heading)
 
-    for section_name, aliases in (
-        SECTION_ALIASES.items()
-    ):
-        if heading in aliases:
-            return section_name
+    if direct is not None:
+        return direct
 
-    return None
+    return identify_compound_section(
+        heading
+    )
 
 
 # --------------------------------------------------
