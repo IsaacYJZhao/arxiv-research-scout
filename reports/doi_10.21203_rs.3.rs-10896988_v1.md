@@ -1,0 +1,67 @@
+# Explainable AI-Based Pulmonary Nodule Classification from Computed Tomography Images with an End-to-End Clinical Decision Support Interface
+
+## Paper Information
+
+- **Source:** europepmc
+- **Paper ID:** PPR1355251
+- **DOI:** 10.21203/rs.3.rs-10896988/v1
+- **Venue:** Not reported in the available evidence.
+- **Authors:** Das S, Hajare S, Hakeem Au, Nimje A
+- **Published:** 2026-11-02
+- **Updated:** 2026-11-02
+- **Categories:** 
+- **Landing URL:** https://doi.org/10.21203/rs.3.rs-10896988/v1
+- **PDF URL:** Not reported in the available evidence.
+
+## Analysis Information
+
+- **Provider:** deepseek
+- **Model:** deepseek-v4-pro
+- **Evidence level:** abstract_only
+- **Confidence:** low
+- **PDF status:** No full text available; abstract only
+
+## Methodology
+
+本文提出一个可解释的端到端肺结节分类 CAD 系统。方法上采用迁移学习的 ResNet-50 架构，在来自公开 LUNA16 数据集的 2,372 个平衡 CT patch 上进行微调。推理流程中集成 Grad-CAM，为每个预测生成热力图，用于可视化驱动分类决策的判别区域。系统以生产级 Web 应用形式部署，包含 FastAPI 后端和 React 前端，并具备身份认证与数据库持久化功能。此外，系统还引入了基于置信度的弃权机制：当预测概率低于 60% 阈值时返回 “Inconclusive” 判定。更多预处理、数据增强、训练策略、优化器、学习率、损失函数、epoch 数、参数量或推理时间等细节未在可用证据中报告。
+
+## Evaluation
+
+评估在留出测试集上进行，测试集规模为 356 个样本。证据中未明确报告训练集、验证集规模，也未说明数据划分方式、交叉验证设置，或与哪些 baseline 方法进行了比较。报告的分类指标包括 accuracy、precision、recall、F1 score 和 AUC-ROC。未报告统计检验。
+
+## Innovation
+
+作者声明的主要贡献不是追求最先进的原始准确率，而是证明可以将具有竞争力的分类性能、实时视觉可解释性（Grad-CAM）以及完整可部署、可通过浏览器访问并具备认证和数据库持久化的临床界面集成到一个可复现的开源系统中，为未来医院验证研究提供一个实用基线。
+
+## Datasets
+
+- LUNA16
+
+## Metrics
+
+- accuracy
+- precision
+- recall
+- F1 score
+- AUC-ROC
+
+## Key Results
+
+- 系统在 356 个样本的留出测试集上达到 accuracy 90.45%。
+- precision 为 90.91%。
+- recall 为 89.89%。
+- F1 score 为 90.40%。
+- AUC-ROC 为 0.9615。
+- 模型在来自 LUNA16 的 2,372 个平衡 CT patch 上进行微调。
+- 系统集成 Grad-CAM 以生成逐预测热力图，并部署为基于 FastAPI 后端和 React 前端的 Web 应用，包含认证和数据库持久化。
+- 基于置信度的弃权机制对低于 60% 概率阈值的预测返回 “Inconclusive” 判定。
+
+## Limitations
+
+作者在可用证据中未明确列出研究局限性。基于证据不完整可推断的限制包括：仅报告了 LUNA16 数据集上的测试结果，未见多中心或外部验证数据；未报告与 baseline 方法的对比、统计检验、训练/验证/测试划分细节、预处理和训练超参数；系统未声称达到最先进的原始准确率，其临床适用性和可推广性仍待医院验证研究确认。上述推断性限制不应被视为作者明确声明的局限性。
+
+## Processing Notes
+
+The PDF could not be fully processed. Analysis used the available arXiv metadata and other recoverable evidence.
+
+- **PDF error:** No downloadable full text is available for this record.
